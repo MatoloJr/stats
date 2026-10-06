@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <enum id="org.gnome.shell.extensions.stats.Position">
+    <value nick="left" value="0"/>
+    <value nick="right" value="1"/>
+  </enum>
+  <enum id="org.gnome.shell.extensions.stats.TemperatureUnit">
+    <value nick="c" value="0"/>
+    <value nick="f" value="1"/>
+  </enum>
+  <enum id="org.gnome.shell.extensions.stats.DisplayMode">
+    <value nick="icon-text" value="0"/>
+    <value nick="text" value="1"/>
+    <value nick="compact" value="2"/>
+  </enum>
+
+  <schema id="org.gnome.shell.extensions.stats" path="/org/gnome/shell/extensions/stats/">
+    <key name="position" enum="org.gnome.shell.extensions.stats.Position">
+      <default>'right'</default>
+      <summary>Top-bar side</summary>
+      <description>Place the Stats indicator on the left or right side of the top bar.</description>
+    </key>
+    <key name="position-index" type="i">
+      <default>0</default>
+      <range min="0" max="20"/>
+      <summary>Position index</summary>
+      <description>Child index passed to Main.panel.addToStatusArea. Index 1 on the left sits after the Activities button.</description>
+    </key>
+    <key name="poll-interval-ms" type="i">
+      <default>1000</default>
+      <range min="500" max="10000"/>
+      <summary>Poll interval</summary>
+      <description>How often sensors are read, in milliseconds.</description>
+    </key>
+    <key name="temperature-unit" enum="org.gnome.shell.extensions.stats.TemperatureUnit">
+      <default>'c'</default>
+      <summary>Temperature unit</summary>
+    </key>
+    <key name="display-mode" enum="org.gnome.shell.extensions.stats.DisplayMode">
+      <default>'icon-text'</default>
+      <summary>Top-bar display mode</summary>
+    </key>
+    <key name="pause-when-locked" type="b">
+      <default>true</default>
+      <summary>Pause while locked or idle</summary>
+      <description>Stop polling while the screen shield is locked or the session is idle.</description>
+    </key>
+    <key name="bar-metrics" type="as">
+      <default>['cpu', 'memory', 'gpu', 'temperature', 'refresh']</default>
+      <summary>Metrics shown in the top bar, in order</summary>
+    </key>
+    <key name="gpu-id" type="s">
+      <default>''</default>
+      <summary>GPU card to show in the top bar</summary>
+      <description>DRM card name such as card1. Empty selects an active discrete GPU, or the active integrated GPU.</description>
+    </key>
+    <key name="headline-temp" type="s">
+      <default>''</default>
+      <summary>Headline temperature sensor id</summary>
+      <description>Empty uses the CPU package temperature.</description>
+    </key>
+    <key name="mount-points" type="as">
+      <default>['/']</default>
+      <summary>Mount points to monitor</summary>
+    </key>
+    <key name="cpu-warning" type="i">
+      <default>70</default>
+      <range min="0" max="100"/>
+      <summary>CPU warning percent</summary>
+    </key>
+    <key name="cpu-critical" type="i">
+      <default>90</default>
+      <range min="0" max="100"/>
+      <summary>CPU critical percent</summary>
+    </key>
+    <key name="memory-warning" type="i">
+      <default>70</default>
+      <range min="0" max="100"/>
+      <summary>Memory warning percent</summary>
+    </key>
+    <key name="memory-critical" type="i">
+      <default>90</default>
+      <range min="0" max="100"/>
+      <summary>Memory critical percent</summary>
+    </key>
+    <key name="storage-warning" type="i">
+      <default>70</default>
+      <range min="0" max="100"/>
+      <summary>Storage warning percent</summary>
+    </key>
+    <key name="storage-critical" type="i">
+      <default>90</default>
+      <range min="0" max="100"/>
+      <summary>Storage critical percent</summary>
+    </key>
+    <key name="gpu-warning" type="i">
+      <default>70</default>
+      <range min="0" max="100"/>
+      <summary>GPU warning percent</summary>
+    </key>
+    <key name="gpu-critical" type="i">
+      <default>90</default>
+      <range min="0" max="100"/>
+      <summary>GPU critical percent</summary>
+    </key>
+    <key name="temp-warning" type="i">
+      <default>75</default>
+      <range min="0" max="150"/>
+      <summary>Temperature warning in Celsius</summary>
+    </key>
+    <key name="temp-critical" type="i">
+      <default>90</default>
+      <range min="0" max="150"/>
+      <summary>Temperature critical in Celsius</summary>
+    </key>
+    <key name="show-sparklines" type="b">
+      <default>true</default>
+      <summary>Show sparklines in the popup</summary>
+    </key>
+    <key name="history-seconds" type="i">
+      <default>60</default>
+      <range min="30" max="120"/>
+      <summary>History length in seconds</summary>
+    </key>
+    <key name="show-per-core" type="b">
+      <default>true</default>
+      <summary>Show per-core CPU bars in the popup</summary>
+    </key>
+  </schema>
+</schemalist>
