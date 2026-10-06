@@ -4,7 +4,7 @@ overview: Show each top-bar metric as name, percent or degrees, and speed, separ
 todos:
   - id: bar-fields
     content: Show name, percent or degrees, and speed per metric, separated by " | ", and add storage to the default bar
-    status: pending
+    status: in_progress
   - id: bar-fit
     content: Drop fixed min-widths and hide speed, icons, then temp/refresh when the bar would overlap the clock
     status: pending

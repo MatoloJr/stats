@@ -16,15 +16,15 @@
 
   <schema id="org.gnome.shell.extensions.stats" path="/org/gnome/shell/extensions/stats/">
     <key name="position" enum="org.gnome.shell.extensions.stats.Position">
-      <default>'right'</default>
+      <default>'left'</default>
       <summary>Top-bar side</summary>
       <description>Place the Stats indicator on the left or right side of the top bar.</description>
     </key>
     <key name="position-index" type="i">
-      <default>0</default>
+      <default>20</default>
       <range min="0" max="20"/>
       <summary>Position index</summary>
-      <description>Child index passed to Main.panel.addToStatusArea. Index 1 on the left sits after the Activities button.</description>
+      <description>Child index passed to Main.panel.addToStatusArea. Index 20 on the left appends Stats after the workspace indicator, just before the clock.</description>
     </key>
     <key name="poll-interval-ms" type="i">
       <default>1000</default>
@@ -46,7 +46,7 @@
       <description>Stop polling while the screen shield is locked or the session is idle.</description>
     </key>
     <key name="bar-metrics" type="as">
-      <default>['cpu', 'memory', 'gpu', 'temperature', 'refresh']</default>
+      <default>['cpu', 'memory', 'storage', 'gpu', 'temperature', 'refresh']</default>
       <summary>Metrics shown in the top bar, in order</summary>
     </key>
     <key name="gpu-id" type="s">

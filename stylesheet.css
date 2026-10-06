@@ -1,5 +1,5 @@
 .stats-bar {
-    spacing: 8px;
+    spacing: 0;
 }
 
 .stats-item {
@@ -10,28 +10,12 @@
     icon-size: 16px;
 }
 
-.stats-value {
+.stats-name,
+.stats-value,
+.stats-speed,
+.stats-sep {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
-    text-align: right;
-}
-
-.stats-cpu .stats-value,
-.stats-memory .stats-value,
-.stats-storage .stats-value {
-    min-width: 7.4em;
-}
-
-.stats-gpu .stats-value {
-    min-width: 9.2em;
-}
-
-.stats-temperature .stats-value {
-    min-width: 3.6em;
-}
-
-.stats-refresh .stats-value {
-    min-width: 4.4em;
 }
 
 .stats-warning {
@@ -42,9 +26,8 @@
     color: #c01c28;
 }
 
-.stats-menu,
 .stats-dashboard-item {
-    min-width: 340px;
+    padding: 6px 8px;
 }
 
 .stats-dashboard {

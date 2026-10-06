@@ -73,14 +73,14 @@ export default class StatsPreferences extends ExtensionPreferences {
             ['left', 'right'],
             nick => {
                 if (nick === 'left' && settings.get_int('position-index') === 0)
-                    settings.set_int('position-index', 1);
+                    settings.set_int('position-index', 20);
             });
         addSpin(
             group,
             settings,
             'position-index',
             'Position index',
-            'Use 1 on the left to sit after the Activities button',
+            'Use 20 on the left to sit after the workspace indicator, just before the clock',
             0,
             20,
             1);
