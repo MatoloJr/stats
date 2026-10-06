@@ -11,8 +11,8 @@ import {TemperatureSensor} from './lib/sensors/temperature.js';
 
 export default class StatsPreferences extends ExtensionPreferences {
     /**
-     * @param {Adw.PreferencesWindow} window
-     */
+    * @param {Adw.PreferencesWindow} window
+    */
     fillPreferencesWindow(window) {
         this._closed = false;
         this._deferId = 0;
@@ -40,8 +40,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {() => void} callback
-     */
+    * @param {() => void} callback
+    */
     _defer(callback) {
         if (this._deferId)
             GLib.source_remove(this._deferId);
@@ -54,8 +54,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _generalPage(settings) {
         const page = new Adw.PreferencesPage({
             title: 'General',
@@ -117,8 +117,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _metricsPage(settings) {
         const page = new Adw.PreferencesPage({
             title: 'Metrics',
@@ -181,8 +181,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _buildMetrics(settings) {
         if (this._closed)
             return;
@@ -232,8 +232,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _buildMounts(settings) {
         if (this._closed)
             return;
@@ -254,11 +254,11 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     * @param {Adw.ComboRow} row
-     * @param {string} key
-     * @param {() => string[]} ids
-     */
+    * @param {Gio.Settings} settings
+    * @param {Adw.ComboRow} row
+    * @param {string} key
+    * @param {() => string[]} ids
+    */
     _bindIdCombo(settings, row, key, ids) {
         row.connect('notify::selected', () => {
             if (row._statsLock)
@@ -278,8 +278,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _loadGpuChoices(settings) {
         listGpuCards(null).then(cards => {
             if (this._closed)
@@ -298,8 +298,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _loadTempChoices(settings) {
         const sensor = new TemperatureSensor();
         sensor.discover(null).then(found => {
@@ -323,8 +323,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _thresholdPage(settings) {
         const page = new Adw.PreferencesPage({
             title: 'Thresholds',
@@ -353,8 +353,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _popupPage(settings) {
         const page = new Adw.PreferencesPage({
             title: 'Popup',
@@ -391,8 +391,8 @@ export default class StatsPreferences extends ExtensionPreferences {
     }
 
     /**
-     * @param {Gio.Settings} settings
-     */
+    * @param {Gio.Settings} settings
+    */
     _aboutPage(settings) {
         const page = new Adw.PreferencesPage({
             title: 'About',
@@ -421,9 +421,9 @@ export default class StatsPreferences extends ExtensionPreferences {
 }
 
 /**
- * @param {string} iconName
- * @returns {Gtk.Button}
- */
+* @param {string} iconName
+* @returns {Gtk.Button}
+*/
 function iconButton(iconName) {
     return new Gtk.Button({
         icon_name: iconName,
@@ -432,12 +432,12 @@ function iconButton(iconName) {
 }
 
 /**
- * @param {Adw.PreferencesGroup} group
- * @param {Gio.Settings} settings
- * @param {string} key
- * @param {string} title
- * @param {string} subtitle
- */
+* @param {Adw.PreferencesGroup} group
+* @param {Gio.Settings} settings
+* @param {string} key
+* @param {string} title
+* @param {string} subtitle
+*/
 function addSwitch(group, settings, key, title, subtitle) {
     const row = new Adw.SwitchRow({title, subtitle});
     group.add(row);
@@ -446,14 +446,14 @@ function addSwitch(group, settings, key, title, subtitle) {
 }
 
 /**
- * @param {Adw.PreferencesGroup} group
- * @param {Gio.Settings} settings
- * @param {string} key
- * @param {string} title
- * @param {string[]} labels
- * @param {string[]} nicks
- * @param {(nick: string) => void} [onSelect]
- */
+* @param {Adw.PreferencesGroup} group
+* @param {Gio.Settings} settings
+* @param {string} key
+* @param {string} title
+* @param {string[]} labels
+* @param {string[]} nicks
+* @param {(nick: string) => void} [onSelect]
+*/
 function addCombo(group, settings, key, title, labels, nicks, onSelect) {
     const model = new Gtk.StringList();
     for (const label of labels)
@@ -478,15 +478,15 @@ function addCombo(group, settings, key, title, labels, nicks, onSelect) {
 }
 
 /**
- * @param {Adw.PreferencesGroup} group
- * @param {Gio.Settings} settings
- * @param {string} key
- * @param {string} title
- * @param {string} subtitle
- * @param {number} lower
- * @param {number} upper
- * @param {number} step
- */
+* @param {Adw.PreferencesGroup} group
+* @param {Gio.Settings} settings
+* @param {string} key
+* @param {string} title
+* @param {string} subtitle
+* @param {number} lower
+* @param {number} upper
+* @param {number} step
+*/
 function addSpin(group, settings, key, title, subtitle, lower, upper, step) {
     const row = new Adw.SpinRow({
         title,
@@ -515,10 +515,10 @@ function addSpin(group, settings, key, title, subtitle, lower, upper, step) {
 }
 
 /**
- * @param {Gio.Settings} settings
- * @param {string} id
- * @param {number} direction
- */
+* @param {Gio.Settings} settings
+* @param {string} id
+* @param {number} direction
+*/
 function moveMetric(settings, id, direction) {
     const order = settings.get_strv('bar-metrics')
         .filter(item => METRICS.some(metric => metric.id === item));
@@ -533,11 +533,11 @@ function moveMetric(settings, id, direction) {
 }
 
 /**
- * @param {Adw.ComboRow} row
- * @param {string[]} labels
- * @param {string[]} ids
- * @param {string} selected
- */
+* @param {Adw.ComboRow} row
+* @param {string[]} labels
+* @param {string[]} ids
+* @param {string} selected
+*/
 function applyStringModel(row, labels, ids, selected) {
     const model = new Gtk.StringList();
     for (const label of labels)

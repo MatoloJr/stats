@@ -18,9 +18,12 @@
 
 .stats-cpu .stats-value,
 .stats-memory .stats-value,
-.stats-storage .stats-value,
-.stats-gpu .stats-value {
+.stats-storage .stats-value {
     min-width: 7.4em;
+}
+
+.stats-gpu .stats-value {
+    min-width: 9.2em;
 }
 
 .stats-temperature .stats-value {

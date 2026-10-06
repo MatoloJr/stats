@@ -38,9 +38,9 @@ export default class StatsExtension extends Extension {
     }
 
     /**
-     * Destroying the button removes it from the panel status area. The new
-     * button is added only after that, so other indicators keep their order.
-     */
+    * Destroying the button removes it from the panel status area. The new
+    * button is added only after that, so other indicators keep their order.
+    */
     _placeIndicator() {
         const position = this._settings.get_string('position');
         const index = this._settings.get_int('position-index');
