@@ -4,16 +4,16 @@ overview: Show each top-bar metric as name, percent or degrees, and speed, separ
 todos:
   - id: bar-fields
     content: Show name, percent or degrees, and speed per metric, separated by " | ", and add storage to the default bar
-    status: in_progress
+    status: completed
   - id: bar-fit
     content: Drop fixed min-widths and hide speed, icons, then temp/refresh when the bar would overlap the clock
-    status: pending
+    status: completed
   - id: place-left
     content: Default the indicator to the end of the left box, between the workspace dots and the clock
-    status: pending
+    status: completed
   - id: popup-fit
     content: Make the click menu wrap and cap its width to the monitor, with the same name, value, and speed on each section
-    status: pending
+    status: completed
 isProject: false
 ---
 
