@@ -5,8 +5,8 @@
     <value nick="right" value="1"/>
   </enum>
   <enum id="org.gnome.shell.extensions.stats.TemperatureUnit">
-    <value nick="c" value="0"/>
-    <value nick="f" value="1"/>
+    <value nick="celsius" value="0"/>
+    <value nick="fahrenheit" value="1"/>
   </enum>
   <enum id="org.gnome.shell.extensions.stats.DisplayMode">
     <value nick="icon-text" value="0"/>
@@ -33,7 +33,7 @@
       <description>How often sensors are read, in milliseconds.</description>
     </key>
     <key name="temperature-unit" enum="org.gnome.shell.extensions.stats.TemperatureUnit">
-      <default>'c'</default>
+      <default>'celsius'</default>
       <summary>Temperature unit</summary>
     </key>
     <key name="display-mode" enum="org.gnome.shell.extensions.stats.DisplayMode">

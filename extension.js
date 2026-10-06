@@ -65,7 +65,7 @@ export default class StatsExtension extends Extension {
             try {
                 const id = shield.connect(signal, () => this._syncPause());
                 this._shieldIds.push([shield, id]);
-            } catch (error) {
+            } catch {
                 logInfo(`screen shield signal ${signal} is unavailable`);
             }
         }
@@ -79,7 +79,7 @@ export default class StatsExtension extends Extension {
         for (const [target, id] of this._shieldIds) {
             try {
                 target.disconnect(id);
-            } catch (error) {
+            } catch {
                 // The emitter can already be gone while the session is closing.
             }
         }

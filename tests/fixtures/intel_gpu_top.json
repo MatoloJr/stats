@@ -1,0 +1,7 @@
+{
+  "engines": {
+    "Render/3D": { "busy": 12.5, "sema": 0.0, "wait": 0.0 },
+    "Blitter": { "busy": 1.0, "sema": 0.0, "wait": 0.0 }
+  },
+  "frequency": { "requested": 700, "actual": 450 }
+}
