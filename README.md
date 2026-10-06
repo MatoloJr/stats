@@ -52,7 +52,7 @@ Enable the extension inside that session with `gnome-extensions enable stats@loc
 - Temperature is read from hwmon (Intel `coretemp` package, AMD `k10temp` Tctl/Tdie, NVMe composite, amdgpu) and from the `x86_pkg_temp` thermal zone. Values are converted from millidegrees. Thresholds are stored in Celsius.
 - Refresh rate comes from Mutter `GetCurrentState` on `org.gnome.Mutter.DisplayConfig`, updated by the `MonitorsChanged` signal rather than the poll timer. The figure is the **nominal mode rate**. Variable-refresh panels expose `refresh-rate-mode = variable`, but not the instantaneous rate, so Stats does not invent one.
 
-The top bar sits on the left by default, after the workspace indicator and before the clock. Change **Position** in preferences to move it; the indicator is recreated immediately. Index `20` on the left keeps it at the end of that side. Each metric shows its name, a percent or a temperature, and a speed, separated by `|`. When the row would run into the clock it drops speed, then icons, then temperature and refresh. Compact mode shows the first enabled metric until the pointer hovers the indicator or the menu is open.
+The top bar sits on the left by default, after the workspace indicator and before the clock. Change **Position** in preferences to move it; the indicator is recreated immediately. Index `20` on the left keeps it at the end of that side. Each metric shows its name, a percent or a temperature and a speed, separated by `|`. When the row would run into the clock it drops speed, then icons, then temperature and refresh. Compact mode shows the first enabled metric until the pointer hovers the indicator or the menu is open.
 
 ## Develop
 

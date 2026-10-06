@@ -1,9 +1,9 @@
 ---
 name: Responsive left bar
-overview: Show each top-bar metric as name, percent or degrees, and speed, separated by pipes, and place that bar in the gap between the workspace dots and the clock. The click menu wraps to the monitor so the same figures stay readable.
+overview: Show each top-bar metric as name, percent or degrees and speed, separated by pipes and place that bar in the gap between the workspace dots and the clock. The click menu wraps to the monitor so the same figures stay readable.
 todos:
   - id: bar-fields
-    content: Show name, percent or degrees, and speed per metric, separated by " | ", and add storage to the default bar
+    content: Show name, percent or degrees and speed per metric, separated by " | " and add storage to the default bar
     status: completed
   - id: bar-fit
     content: Drop fixed min-widths and hide speed, icons, then temp/refresh when the bar would overlap the clock
@@ -12,14 +12,14 @@ todos:
     content: Default the indicator to the end of the left box, between the workspace dots and the clock
     status: completed
   - id: popup-fit
-    content: Make the click menu wrap and cap its width to the monitor, with the same name, value, and speed on each section
+    content: Make the click menu wrap and cap its width to the monitor, with the same name, value and speed on each section
     status: completed
 isProject: false
 ---
 
 # Responsive Stats bar on the left
 
-The indicator is in the right box, and each label is a single short string with a large `min-width` ([stylesheet.css](stylesheet.css)). GPU therefore shows `450 MHz` instead of a percent ([lib/indicator.js](lib/indicator.js) `gpuBarText`). Storage is not in the default `bar-metrics` list. Nothing has been written under `/org/gnome/shell/extensions/stats/`, so schema defaults are what this session uses.
+The indicator is in the right box and each label is a single short string with a large `min-width` ([stylesheet.css](stylesheet.css)). GPU therefore shows `450 MHz` instead of a percent ([lib/indicator.js](lib/indicator.js) `gpuBarText`). Storage is not in the default `bar-metrics` list. Nothing has been written under `/org/gnome/shell/extensions/stats/`, so schema defaults are what this session uses.
 
 ## Top bar contents
 
@@ -43,7 +43,7 @@ That gap is the end of the panel’s left box. Change the schema defaults to `po
 
 Keep the existing panel menu. In [lib/widgets/dashboard.js](lib/widgets/dashboard.js) and [stylesheet.css](stylesheet.css):
 
-- Put name, percent or degrees, and speed on the first line of each section, then the meter and sparkline already there.
+- Put name, percent or degrees and speed on the first line of each section, then the meter and sparkline already there.
 - Turn line wrap on for detail labels.
 - Cap the menu width at `min(480, monitor width - 24)` using the primary monitor, with `x_expand`, so it stays on screen from the left-side button.
 
