@@ -33,10 +33,20 @@ await new Promise(resolve => {
     });
 });
 
+for (const sensor of sensors)
+    await sensor.sample(context);
+
+await new Promise(resolve => {
+    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1200, () => {
+        resolve();
+        return GLib.SOURCE_REMOVE;
+    });
+});
+
 for (const sensor of sensors) {
     const sample = await sensor.sample(context);
     const brief = JSON.stringify(sample);
-    console.log(sensor.id, brief.length > 800 ? `${brief.slice(0, 800)}…` : brief);
+    console.log(sensor.id, brief.length > 500 ? `${brief.slice(0, 500)}…` : brief);
 }
 
 for (const sensor of sensors)
