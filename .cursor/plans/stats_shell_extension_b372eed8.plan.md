@@ -4,7 +4,7 @@ overview: "Build the Stats GNOME Shell extension (ES modules, UUID `stats@local`
 todos:
   - id: phase-1-skeleton
     content: "Skeleton: metadata, schema, static indicator, live left/right placement"
-    status: pending
+    status: in_progress
   - id: phase-2-cpu-ram
     content: Poller, CPU and RAM sensors, compact bar label, threshold colours
     status: pending
