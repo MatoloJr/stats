@@ -15,7 +15,9 @@ make enable
 
 `make install` symlinks this directory to `~/.local/share/gnome-shell/extensions/stats@local/` and compiles the schema. Settings persist in dconf across logout.
 
-GNOME Shell on Wayland does not reload extensions with Alt+F2 `r`. After the first install, log out and back in. Later code changes also need a new session (or the nested session below) before the shell picks them up.
+`make enable` turns Stats on when this Shell session already knows the extension. On a first install the running session has not scanned `~/.local/share/gnome-shell/extensions` yet, so `gnome-extensions enable` reports that `stats@local` does not exist and does not save the setting. `make enable` records the UUID in `org.gnome.shell enabled-extensions` (and removes it from `disabled-extensions`) and exits successfully. The top-bar indicator appears after you log out and back in.
+
+GNOME Shell on Wayland does not reload extensions with Alt+F2 `r`. Later code changes also need a new session (or the nested session below) before the shell picks them up.
 
 ```bash
 make disable

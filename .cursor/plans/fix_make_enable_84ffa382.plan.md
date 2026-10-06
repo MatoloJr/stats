@@ -4,10 +4,10 @@ overview: "`make enable` fails because the already-running GNOME Shell built its
 todos:
   - id: enable-target
     content: Make `make enable` queue stats@local in gsettings when the running Shell has not scanned it, and enable normally when it has
-    status: pending
+    status: completed
   - id: readme-install
     content: Update Makefile install hints and README so enable-before-logout is expected and does not look like a failed install
-    status: pending
+    status: completed
 isProject: false
 ---
 
