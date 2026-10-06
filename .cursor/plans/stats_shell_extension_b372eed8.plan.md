@@ -4,28 +4,28 @@ overview: "Build the Stats GNOME Shell extension (ES modules, UUID `stats@local`
 todos:
   - id: phase-1-skeleton
     content: "Skeleton: metadata, schema, static indicator, live left/right placement"
-    status: in_progress
+    status: completed
   - id: phase-2-cpu-ram
     content: Poller, CPU and RAM sensors, compact bar label, threshold colours
-    status: pending
+    status: completed
   - id: phase-3-storage-temp
     content: Storage and temperature sensors plus parser fixtures and gjs tests
-    status: pending
+    status: completed
   - id: phase-4-gpu
     content: GPU detection for NVIDIA, AMD, Intel, hybrid idle/off fallbacks
-    status: pending
+    status: completed
   - id: phase-5-display
     content: Mutter DisplayConfig refresh rate with MonitorsChanged
-    status: pending
+    status: completed
   - id: phase-6-popup
     content: Popup dashboard, sparklines, per-core meters
-    status: pending
+    status: completed
   - id: phase-7-prefs
     content: "libadwaita preferences: all pages, reorder, reset"
-    status: pending
+    status: completed
   - id: phase-8-hardening
     content: Lock/idle pause, leak-safe disable, lint, README, make pack
-    status: pending
+    status: completed
 isProject: false
 ---
 

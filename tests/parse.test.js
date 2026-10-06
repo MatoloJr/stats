@@ -30,9 +30,9 @@ import {
 let failed = 0;
 
 /**
-* @param {boolean} condition
-* @param {string} message
-*/
+ * @param {boolean} condition
+ * @param {string} message
+ */
 function assert(condition, message) {
     if (!condition) {
         failed += 1;
@@ -41,18 +41,18 @@ function assert(condition, message) {
 }
 
 /**
-* @param {number} actual
-* @param {number} expected
-* @param {string} message
-*/
+ * @param {number} actual
+ * @param {number} expected
+ * @param {string} message
+ */
 function assertClose(actual, expected, message) {
     assert(Math.abs(actual - expected) < 0.001, `${message}: ${actual} vs ${expected}`);
 }
 
 /**
-* @param {string} name
-* @returns {string}
-*/
+ * @param {string} name
+ * @returns {string}
+ */
 function readFixture(name) {
     const file = Gio.File.new_for_uri(import.meta.url)
         .get_parent()
