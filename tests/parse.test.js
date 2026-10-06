@@ -4,7 +4,7 @@ import System from 'system';
 import {parseProcStat, parseFrequencyKhz, usagePercent} from '../lib/sensors/cpu.js';
 import {parseDisplayState, unpack} from '../lib/sensors/display.js';
 import {isSuspended, parseVendor, selectCard} from '../lib/sensors/gpu/detect.js';
-import {consumeJsonObjects, parseIntelGpuTop} from '../lib/sensors/gpu/intel.js';
+import {consumeJsonObjects, intelFrequencyPaths, parseIntelGpuTop} from '../lib/sensors/gpu/intel.js';
 import {parseNvidiaCsvLine} from '../lib/sensors/gpu/nvidia.js';
 import {parseMeminfo} from '../lib/sensors/memory.js';
 import {
@@ -155,6 +155,9 @@ assert(first.objects.length === 0, 'incomplete JSON stays buffered');
 const done = consumeJsonObjects(first.rest + streamed.slice(40));
 assert(done.objects.length === 2, 'two intel JSON objects');
 assertClose(parseIntelGpuTop(done.objects[1]).util, 4, 'second intel sample');
+const freqPaths = intelFrequencyPaths('/sys/class/drm/card1');
+assert(freqPaths[0] === '/sys/class/drm/card1/gt/gt0/rps_act_freq_mhz', 'newer intel freq path');
+assert(freqPaths[1] === '/sys/class/drm/card1/gt_act_freq_mhz', 'older intel freq path');
 
 assert(parseVendor('0x10de\n') === 'nvidia', 'nvidia vendor');
 assert(parseVendor('0x1002') === 'amd', 'amd vendor');
