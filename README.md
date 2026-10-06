@@ -1,6 +1,6 @@
 # Stats
 
-Stats is a GNOME Shell extension that shows real-time system usage in the top bar: CPU, memory, storage, GPU, temperature, and the nominal refresh rate of each monitor. Click the indicator for a dashboard. The display name, preferences title, and popup header are **Stats**.
+Stats is a GNOME Shell extension that shows real-time system usage in the top bar: CPU, memory, storage, GPU, temperature and the nominal refresh rate of each monitor. Click the indicator for a dashboard. The display name, preferences title and popup header are **Stats**.
 
 The UUID is `stats@local`, set only in [`metadata.json`](metadata.json). The install directory must use that same name. The GSettings schema id is `org.gnome.shell.extensions.stats` (`lib/constants.js`).
 
@@ -47,7 +47,7 @@ Enable the extension inside that session with `gnome-extensions enable stats@loc
 
 - CPU percent is the busy share of `/proc/stat` between ticks (`idle + iowait` against total). The first tick is `n/a`. Frequency comes from `scaling_cur_freq` and is hidden when cpufreq is missing.
 - Memory used is `MemTotal - MemAvailable`.
-- Storage space is read per mount point (default `/`). Read/write speed sums physical disks from `/proc/diskstats` (512-byte sectors), skipping loop, ram, device-mapper, and partitions whose parent disk is already counted.
+- Storage space is read per mount point (default `/`). Read/write speed sums physical disks from `/proc/diskstats` (512-byte sectors), skipping loop, ram, device-mapper and partitions whose parent disk is already counted.
 - GPU vendor comes from `/sys/class/drm/card*/device/vendor`. A card whose runtime PM status is `suspended` is shown as `idle/off` and is not queried, so a sleeping discrete GPU is not woken up. NVIDIA samples come from one long-lived `nvidia-smi -l 1` process. AMD uses sysfs. Intel shows the current GT frequency from sysfs (`gt/gt0/rps_act_freq_mhz`, or `gt_act_freq_mhz` on older layouts) and engine utilisation only when `intel_gpu_top` runs.
 - Temperature is read from hwmon (Intel `coretemp` package, AMD `k10temp` Tctl/Tdie, NVMe composite, amdgpu) and from the `x86_pkg_temp` thermal zone. Values are converted from millidegrees. Thresholds are stored in Celsius.
 - Refresh rate comes from Mutter `GetCurrentState` on `org.gnome.Mutter.DisplayConfig`, updated by the `MonitorsChanged` signal rather than the poll timer. The figure is the **nominal mode rate**. Variable-refresh panels expose `refresh-rate-mode = variable`, but not the instantaneous rate, so Stats does not invent one.
@@ -63,7 +63,7 @@ make schemas
 make pack     # stats@local.shell-extension.zip
 ```
 
-Parser tests cover `/proc/stat`, `/proc/meminfo`, `/proc/diskstats`, hwmon selection, nvidia-smi CSV, intel_gpu_top JSON, and Mutter monitor state. They do not need a running shell.
+Parser tests cover `/proc/stat`, `/proc/meminfo`, `/proc/diskstats`, hwmon selection, nvidia-smi CSV, intel_gpu_top JSON and Mutter monitor state. They do not need a running shell.
 
 ### Enable and disable leak check
 
@@ -76,4 +76,4 @@ for i in $(seq 1 20); do
 done
 ```
 
-Then confirm `journalctl -o cat /usr/bin/gnome-shell` has no Stats errors, and that no `nvidia-smi` or `intel_gpu_top` process remains after disable. Polling also pauses while the screen is locked or the session is idle when that preference is on.
+Then confirm `journalctl -o cat /usr/bin/gnome-shell` has no Stats errors and that no `nvidia-smi` or `intel_gpu_top` process remains after disable. Polling also pauses while the screen is locked or the session is idle when that preference is on.
