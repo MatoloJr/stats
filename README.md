@@ -1,6 +1,6 @@
 # Stats
 
-Stats is a GNOME Shell extension that shows real-time system usage in the top bar: CPU, memory, storage, GPU, temperature and the nominal refresh rate of each monitor. Click the indicator for a dashboard. The display name, preferences title and popup header are **Stats**.
+Stats is a GNOME Shell extension that shows real-time system usage in the top bar: CPU, memory, storage, GPU, temperature and the nominal refresh rate of each monitor. Click the indicator for a dashboard; it scrolls, and clicking a section heading folds that section away. The display name, preferences title and popup header are **Stats**.
 
 The UUID is `stats@local`, set only in [`metadata.json`](metadata.json). The install directory must use that same name. The GSettings schema id is `org.gnome.shell.extensions.stats` (`lib/constants.js`).
 
@@ -61,7 +61,11 @@ Enable the extension inside that session with `gnome-extensions enable stats@loc
 - Refresh rate comes from Mutter `GetCurrentState` on `org.gnome.Mutter.DisplayConfig`, updated by the `MonitorsChanged` signal rather than the poll timer. The figure is the **nominal mode rate**. Variable-refresh panels expose `refresh-rate-mode = variable`, but not the instantaneous rate, so Stats does not invent one.
 - Network speed sums `/proc/net/dev`, skipping loopback. The first sample is `n/a`. Down is received bytes per second and up is transmitted bytes per second.
 
-The top bar sits on the left by default, after the workspace indicator and before the clock. Download and upload speeds sit on the right, immediately after the clock. Change **Position** in preferences to move the main indicator; the network chip stays on the right. Index `20` on the left keeps the main indicator at the end of that side. Each metric shows its name, a percent or a temperature and a speed, separated by `|`. On a narrow panel the speed drops first, then the icon, leaving the name and the value (`CPU 34%`). If that still meets the clock, refresh and temperature drop, then later percent metrics from the right. The network chip narrows the same way: it drops its icon, shortens `Down 1.2 MB/s  Up 40 KB/s` to `↓ 1.2 MB/s  ↑ 40 KB/s`, and finally shows the download speed alone. Compact mode shows the first enabled metric until the pointer hovers the indicator or the menu is open. Resource warnings are off until **Resource warnings** is enabled in preferences.
+The top bar sits on the left by default, after the workspace indicator and before the clock. Download and upload speeds sit on the right, immediately after the clock. Change **Position** in preferences to move the main indicator; the network chip stays on the right. Index `20` on the left keeps the main indicator at the end of that side. Each metric shows its name, a percent or a temperature and a speed, separated by `|`. On a narrow panel the speed drops first, then the icon, leaving the name and the value (`CPU 34%`). If that still meets the clock, refresh and temperature drop, then later percent metrics from the right. The network chip reads `↓ 1.2 MB/s | ↑ 40 KB/s`, each direction with its own arrow; when the gap narrows it keeps the download speed alone. In text mode the arrows become the words `Down` and `Up`. It is pinned to the front of the right box, so an extension enabled later cannot push it away from the clock. Compact mode shows the first enabled metric until the pointer hovers the indicator or the menu is open. Resource warnings are off until **Resource warnings** is enabled in preferences.
+
+## The dashboard
+
+The popup is capped at 480px wide and at 72% of the work area height, and it scrolls, so a tall dashboard cannot run off the bottom of the screen. Each heading is a button: clicking it folds the section and turns the arrow sideways. Folded sections are remembered in `collapsed-sections` and are not refreshed while they are closed, so folding the ones you do not watch also cuts the work done on every poll.
 
 ## Develop
 
