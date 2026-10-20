@@ -22,10 +22,12 @@ import {
 } from '../lib/sensors/temperature.js';
 import {parseNetDev, ratesFromDeltas, sumTraffic} from '../lib/sensors/network.js';
 import {
+    NETWORK_LEVELS,
     formatBytes,
     formatPercent,
     formatRefreshHz,
     formatTemperature,
+    networkText,
 } from '../lib/widgets/formatters.js';
 import {
     average,
@@ -33,6 +35,8 @@ import {
     cpuShare,
     isAboveBaseline,
     isHot,
+    machineShare,
+    pageSizeFrom,
     parseProcessStat,
     parseResidentPages,
     pressureCopy,
@@ -222,6 +226,26 @@ assert(rates.downBps === 2000 && rates.upBps === 0, 'download delta');
 assert(ratesFromDeltas(netB, netA, 1) === null, 'network counter wrap');
 assert(ratesFromDeltas(null, netA, 1) === null, 'first network sample has no rate');
 
+// Every network level must be narrower than the one above it, or fitting
+// would answer a tight panel with a wider chip. The first step drops only the
+// icon, so it keeps the same text; the rest shorten the text itself.
+const networkWidths = NETWORK_LEVELS.map(
+    level => networkText(level, '1.2 MB/s', '40.0 KB/s').length);
+assert(
+    NETWORK_LEVELS[0] === 'icon-named' && networkWidths[0] === networkWidths[1],
+    'the icon step changes nothing but the icon');
+for (let index = 2; index < networkWidths.length; index++) {
+    assert(
+        networkWidths[index] < networkWidths[index - 1],
+        `network level ${NETWORK_LEVELS[index]} is narrower than ${NETWORK_LEVELS[index - 1]}`);
+}
+assert(
+    networkText('named', '1.2 MB/s', '40.0 KB/s') === 'Down 1.2 MB/s  Up 40.0 KB/s',
+    'named network layout');
+assert(
+    networkText('down-only', '1.2 MB/s', '40.0 KB/s') === '\u2193 1.2 MB/s',
+    'down-only network layout');
+
 const processStat = parseProcessStat('1 (Web Content) S 0 0 0 0 0 0 0 0 0 0 10 5');
 assert(processStat.comm === 'Web Content' && processStat.ticks === 15, 'process comm and ticks');
 assert(parseProcessStat('nope') === null, 'bad process stat');
@@ -239,6 +263,18 @@ assert(isAboveBaseline(80, [10, 20]), 'well above its recent share');
 assert(!isAboveBaseline(30, [20]), 'one sample is not a baseline');
 assert(!isAboveBaseline(20, [5, 5]), 'below 25 percent stays quiet');
 assertClose(average([10, 20]), 15, 'baseline average');
+assertClose(machineShare(400, 8), 50, 'four busy cores of eight');
+assert(machineShare(null, 8) === null, 'no share stays null');
+assertClose(machineShare(50, 0), 50, 'unknown core count is one core');
+assert(
+    pageSizeFrom('100 25 1 0 0 0 0', 'Name:\tx\nVmRSS:\t   100 kB\n') === 4096,
+    'four kilobyte pages');
+assert(
+    pageSizeFrom('100 25 1 0 0 0 0', 'VmRSS:\t  1600 kB\n') === 65536,
+    'sixty-four kilobyte pages');
+assert(pageSizeFrom('100 25 1 0 0 0 0', 'VmPeak:\t 10 kB\n') === null, 'no VmRSS line');
+assert(pageSizeFrom(null, 'VmRSS:\t 100 kB\n') === null, 'no statm');
+assert(pageSizeFrom('100 0 1 0 0 0 0', 'VmRSS:\t 100 kB\n') === null, 'no resident pages');
 const copy = pressureCopy({comm: 'b', cpu: 80, memory: 5}, 'cpu', 15, false);
 assert(copy.body.includes('Quit it.') && !copy.body.includes('System Monitor'), 'no monitor offer');
 const monitored = pressureCopy({comm: 'b', cpu: 80, memory: 5}, 'cpu', 15, true);

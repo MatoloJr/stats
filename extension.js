@@ -1,4 +1,3 @@
-import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -37,28 +36,25 @@ export default class StatsExtension extends Extension {
         logInfo('enabled');
     }
 
+    /**
+     * Everything goes synchronously. Deferring the destroy to an idle leaves
+     * the status-area roles taken, and addToStatusArea throws on a conflict,
+     * so a disable followed by an enable in the same main-loop iteration
+     * would fail to come back.
+     */
     disable() {
         this._unbindShield();
         for (const id of this._placeIds)
             this._settings?.disconnect(id);
         this._placeIds = [];
         this._poller?.pause();
-        this._indicator?.setProgress(0);
-        this._network?.setProgress(0);
-        const indicator = this._indicator;
-        const network = this._network;
-        const poller = this._poller;
+        this._indicator?.destroy();
+        this._network?.destroy();
+        this._poller?.destroy();
         this._indicator = null;
         this._network = null;
         this._poller = null;
         this._settings = null;
-        // One frame so the empty meter can paint, then drop every actor and timer.
-        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            indicator?.destroy();
-            network?.destroy();
-            poller?.destroy();
-            return GLib.SOURCE_REMOVE;
-        });
         logInfo('disabled');
     }
 

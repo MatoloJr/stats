@@ -18,9 +18,19 @@
     font-feature-settings: "tnum";
 }
 
+/* The single child of each panel button: ButtonBox allocates no other. */
+.stats-root {
+    spacing: 0;
+}
+
 .stats-startup {
     spacing: 4px;
     min-width: 8em;
+}
+
+.stats-network-startup {
+    spacing: 4px;
+    min-width: 5em;
 }
 
 .stats-network-row {
