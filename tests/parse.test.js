@@ -22,12 +22,12 @@ import {
 } from '../lib/sensors/temperature.js';
 import {parseNetDev, ratesFromDeltas, sumTraffic} from '../lib/sensors/network.js';
 import {
-    NETWORK_LEVELS,
     formatBytes,
     formatPercent,
     formatRefreshHz,
     formatTemperature,
-    networkText,
+    networkLevels,
+    networkLevelText,
 } from '../lib/widgets/formatters.js';
 import {
     average,
@@ -227,24 +227,29 @@ assert(ratesFromDeltas(netB, netA, 1) === null, 'network counter wrap');
 assert(ratesFromDeltas(null, netA, 1) === null, 'first network sample has no rate');
 
 // Every network level must be narrower than the one above it, or fitting
-// would answer a tight panel with a wider chip. The first step drops only the
-// icon, so it keeps the same text; the rest shorten the text itself.
-const networkWidths = NETWORK_LEVELS.map(
-    level => networkText(level, '1.2 MB/s', '40.0 KB/s').length);
-assert(
-    NETWORK_LEVELS[0] === 'icon-named' && networkWidths[0] === networkWidths[1],
-    'the icon step changes nothing but the icon');
-for (let index = 2; index < networkWidths.length; index++) {
+// would answer a tight panel with a wider chip. Each ladder keeps its arrows
+// or its words throughout, so comparing the text compares the whole chip.
+for (const withIcons of [true, false]) {
+    const levels = networkLevels(withIcons);
+    assert(levels.length >= 2, `${withIcons ? 'arrow' : 'word'} ladder has a fallback`);
+    for (let index = 1; index < levels.length; index++) {
+        const wide = networkLevelText(levels[index - 1], '1.2 MB/s', '40.0 KB/s');
+        const narrow = networkLevelText(levels[index], '1.2 MB/s', '40.0 KB/s');
+        assert(
+            narrow.length < wide.length,
+            `network level ${levels[index].id} is narrower than ${levels[index - 1].id}`);
+    }
     assert(
-        networkWidths[index] < networkWidths[index - 1],
-        `network level ${NETWORK_LEVELS[index]} is narrower than ${NETWORK_LEVELS[index - 1]}`);
+        levels.every(level => level.words !== withIcons),
+        'words label the speeds only when there are no arrows');
 }
 assert(
-    networkText('named', '1.2 MB/s', '40.0 KB/s') === 'Down 1.2 MB/s  Up 40.0 KB/s',
-    'named network layout');
+    networkLevelText(networkLevels(true)[0], '1.2 MB/s', '40.0 KB/s') === '1.2 MB/s | 40.0 KB/s',
+    'a bar separates the two speeds');
 assert(
-    networkText('down-only', '1.2 MB/s', '40.0 KB/s') === '\u2193 1.2 MB/s',
-    'down-only network layout');
+    networkLevelText(networkLevels(false)[0], '1.2 MB/s', '40.0 KB/s') ===
+        'Down 1.2 MB/s | Up 40.0 KB/s',
+    'text mode spells the directions out');
 
 const processStat = parseProcessStat('1 (Web Content) S 0 0 0 0 0 0 0 0 0 0 10 5');
 assert(processStat.comm === 'Web Content' && processStat.ticks === 15, 'process comm and ticks');

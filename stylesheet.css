@@ -59,9 +59,32 @@
     font-size: 1.1em;
 }
 
+/* The scroll view is capped from JS against the work area. */
+.stats-scroll {
+    min-height: 0;
+}
+
+.stats-section-header {
+    border-radius: 6px;
+    padding: 2px 4px;
+    margin-top: 4px;
+}
+
+.stats-section-header:hover,
+.stats-section-header:focus {
+    background-color: alpha(currentColor, 0.12);
+}
+
+.stats-section-heading {
+    spacing: 6px;
+}
+
+.stats-section-arrow {
+    icon-size: 12px;
+}
+
 .stats-section-title {
     font-weight: bold;
-    margin-top: 6px;
 }
 
 .stats-section,

@@ -1,3 +1,4 @@
+import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -23,6 +24,9 @@ export default class StatsExtension extends Extension {
         this._network = null;
         this._placeIds = [];
         this._shieldIds = [];
+        this._rightBox = null;
+        this._rightBoxId = 0;
+        this._pinId = 0;
         this._placeIndicator();
         this._placeNetwork();
         this._poller.setPressureHandler(notice => this._notifyPressure(notice));
@@ -47,6 +51,7 @@ export default class StatsExtension extends Extension {
         for (const id of this._placeIds)
             this._settings?.disconnect(id);
         this._placeIds = [];
+        this._unpinNetwork();
         this._poller?.pause();
         this._indicator?.destroy();
         this._network?.destroy();
@@ -87,6 +92,62 @@ export default class StatsExtension extends Extension {
             this._settings,
             () => this._indicator?.menu.toggle());
         Main.panel.addToStatusArea(`${this.uuid}-network`, this._network, 0, 'right');
+        this._pinNetwork();
+    }
+
+    /**
+     * Every other extension also asks for index 0 of the right box, and the
+     * one that loads last wins, so the chip drifts away from the clock. Watch
+     * the box and move it back to the front.
+     */
+    _pinNetwork() {
+        const box = Main.panel._rightBox;
+        if (!box?.connect)
+            return;
+        if (!this._rightBoxId) {
+            this._rightBox = box;
+            this._rightBoxId = box.connect('child-added', () => this._queuePin());
+        }
+        this._queuePin();
+    }
+
+    _queuePin() {
+        if (this._pinId)
+            return;
+        // An idle, because moving the child re-emits child-added, and because
+        // an extension enabled after this one has not been added yet.
+        this._pinId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._moveNetworkToFront();
+            this._pinId = 0;
+            return GLib.SOURCE_REMOVE;
+        });
+        GLib.Source.set_name_by_id(this._pinId, '[stats] pin network chip');
+    }
+
+    _moveNetworkToFront() {
+        const box = this._rightBox;
+        const container = this._network?.container;
+        if (!box || !container || container.get_parent() !== box)
+            return;
+        if (box.get_children()[0] === container)
+            return;
+        box.set_child_at_index(container, 0);
+    }
+
+    _unpinNetwork() {
+        if (this._pinId) {
+            GLib.source_remove(this._pinId);
+            this._pinId = 0;
+        }
+        if (this._rightBoxId && this._rightBox) {
+            try {
+                this._rightBox.disconnect(this._rightBoxId);
+            } catch {
+                // The panel can already be gone while the session closes.
+            }
+        }
+        this._rightBoxId = 0;
+        this._rightBox = null;
     }
 
     _notifyPressure(notice) {

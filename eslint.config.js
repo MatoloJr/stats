@@ -12,6 +12,8 @@ export default [
             sourceType: 'module',
             globals: {
                 console: 'readonly',
+                // GNOME Shell injects this into the extension scope.
+                global: 'readonly',
                 TextDecoder: 'readonly',
                 TextEncoder: 'readonly',
             },
