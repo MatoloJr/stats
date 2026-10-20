@@ -113,6 +113,12 @@ export default class StatsPreferences extends ExtensionPreferences {
             'pause-when-locked',
             'Pause while locked or idle',
             'Stop polling when the screen is locked or the session is idle');
+        addSwitch(
+            group,
+            settings,
+            'pressure-notifications',
+            'Resource warnings',
+            'After CPU or memory stays high, name the program that is above its recent share');
         return page;
     }
 

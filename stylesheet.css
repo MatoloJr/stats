@@ -18,7 +18,14 @@
     font-feature-settings: "tnum";
 }
 
-.stats-warning {
+.stats-startup {
+    spacing: 4px;
+    min-width: 8em;
+}
+
+.stats-network-row {
+    spacing: 4px;
+}
     color: #e5a50a;
 }
 

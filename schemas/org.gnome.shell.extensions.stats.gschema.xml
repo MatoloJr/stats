@@ -126,5 +126,10 @@
       <default>true</default>
       <summary>Show per-core CPU bars in the popup</summary>
     </key>
+    <key name="pressure-notifications" type="b">
+      <default>false</default>
+      <summary>Warn when one program is using much more than usual</summary>
+      <description>After CPU or memory stays at the warning threshold, name the busiest program and suggest quitting it. Off until you turn it on.</description>
+    </key>
   </schema>
 </schemalist>
