@@ -4,7 +4,7 @@ overview: Add a right-side network speed indicator, switch the narrow-panel floo
 todos:
   - id: network-indicator
     content: Add a /proc/net/dev sensor and a right-box indicator immediately after the clock
-    status: pending
+    status: in_progress
   - id: name-value-floor
     content: Change the narrow-panel floor from icon-plus-reading to name-plus-value
     status: pending
