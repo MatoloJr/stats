@@ -19,7 +19,7 @@ From this checkout, `./install.sh` does the same install and prints a four-step 
 curl -fsSL https://example.invalid/stats/install.sh | bash
 ```
 
-That host does not serve the script yet. The script refuses to run as root, leaves your other extensions enabled, and still needs a logout on Wayland before the indicators appear.
+That host does not serve the script yet. The script refuses to run as root, leaves your other extensions enabled and still needs a logout on Wayland before the indicators appear.
 
 `make install` symlinks this directory to `~/.local/share/gnome-shell/extensions/stats@local/` and compiles the schema. Settings persist in dconf across logout.
 
@@ -61,7 +61,7 @@ Enable the extension inside that session with `gnome-extensions enable stats@loc
 - Refresh rate comes from Mutter `GetCurrentState` on `org.gnome.Mutter.DisplayConfig`, updated by the `MonitorsChanged` signal rather than the poll timer. The figure is the **nominal mode rate**. Variable-refresh panels expose `refresh-rate-mode = variable`, but not the instantaneous rate, so Stats does not invent one.
 - Network speed sums `/proc/net/dev`, skipping loopback. The first sample is `n/a`. Down is received bytes per second and up is transmitted bytes per second.
 
-The top bar sits on the left by default, after the workspace indicator and before the clock. Download and upload speeds sit on the right, immediately after the clock. Change **Position** in preferences to move the main indicator; the network chip stays on the right. Index `20` on the left keeps the main indicator at the end of that side. Each metric shows its name, a percent or a temperature, and a speed, separated by `|`. On a narrow panel the icon drops first, leaving the name and the value (`CPU 34%`), then the speed. If that still meets the clock, refresh and temperature drop first. Compact mode shows the first enabled metric until the pointer hovers the indicator or the menu is open. Resource warnings are off until **Resource warnings** is enabled in preferences.
+The top bar sits on the left by default, after the workspace indicator and before the clock. Download and upload speeds sit on the right, immediately after the clock. Change **Position** in preferences to move the main indicator; the network chip stays on the right. Index `20` on the left keeps the main indicator at the end of that side. Each metric shows its name, a percent or a temperature and a speed, separated by `|`. On a narrow panel the icon drops first, leaving the name and the value (`CPU 34%`), then the speed. If that still meets the clock, refresh and temperature drop first. Compact mode shows the first enabled metric until the pointer hovers the indicator or the menu is open. Resource warnings are off until **Resource warnings** is enabled in preferences.
 
 ## Develop
 
