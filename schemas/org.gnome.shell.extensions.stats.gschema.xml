@@ -129,7 +129,7 @@
     <key name="collapsed-sections" type="as">
       <default>[]</default>
       <summary>Dashboard sections the user has folded away</summary>
-      <description>Section keys hidden in the popup. Clicking a section heading adds or removes it, and a folded section is not refreshed while it is closed.</description>
+      <description>Section keys hidden in the popup. Clicking a section heading adds or removes it and a folded section is not refreshed while it is closed.</description>
     </key>
     <key name="pressure-notifications" type="b">
       <default>false</default>

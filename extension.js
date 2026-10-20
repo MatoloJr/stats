@@ -42,7 +42,7 @@ export default class StatsExtension extends Extension {
 
     /**
      * Everything goes synchronously. Deferring the destroy to an idle leaves
-     * the status-area roles taken, and addToStatusArea throws on a conflict,
+     * the status-area roles taken and addToStatusArea throws on a conflict,
      * so a disable followed by an enable in the same main-loop iteration
      * would fail to come back.
      */
@@ -96,7 +96,7 @@ export default class StatsExtension extends Extension {
     }
 
     /**
-     * Every other extension also asks for index 0 of the right box, and the
+     * Every other extension also asks for index 0 of the right box and the
      * one that loads last wins, so the chip drifts away from the clock. Watch
      * the box and move it back to the front.
      */
@@ -114,7 +114,7 @@ export default class StatsExtension extends Extension {
     _queuePin() {
         if (this._pinId)
             return;
-        // An idle, because moving the child re-emits child-added, and because
+        // An idle, because moving the child re-emits child-added and because
         // an extension enabled after this one has not been added yet.
         this._pinId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._moveNetworkToFront();

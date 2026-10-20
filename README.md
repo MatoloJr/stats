@@ -1,6 +1,6 @@
 # Stats
 
-Stats is a GNOME Shell extension that shows real-time system usage in the top bar: CPU, memory, storage, GPU, temperature and the nominal refresh rate of each monitor. Click the indicator for a dashboard; it scrolls, and clicking a section heading folds that section away. The display name, preferences title and popup header are **Stats**.
+Stats is a GNOME Shell extension that shows real-time system usage in the top bar: CPU, memory, storage, GPU, temperature and the nominal refresh rate of each monitor. Click the indicator for a dashboard; it scrolls and clicking a section heading folds that section away. The display name, preferences title and popup header are **Stats**.
 
 The UUID is `stats@local`, set only in [`metadata.json`](metadata.json). The install directory must use that same name. The GSettings schema id is `org.gnome.shell.extensions.stats` (`lib/constants.js`).
 
@@ -65,7 +65,7 @@ The top bar sits on the left by default, after the workspace indicator and befor
 
 ## The dashboard
 
-The popup is capped at 480px wide and at 72% of the work area height, and it scrolls, so a tall dashboard cannot run off the bottom of the screen. Each heading is a button: clicking it folds the section and turns the arrow sideways. Folded sections are remembered in `collapsed-sections` and are not refreshed while they are closed, so folding the ones you do not watch also cuts the work done on every poll.
+The popup is capped at 480px wide and at 72% of the work area height and it scrolls, so a tall dashboard cannot run off the bottom of the screen. Each heading is a button: clicking it folds the section and turns the arrow sideways. Folded sections are remembered in `collapsed-sections` and are not refreshed while they are closed, so folding the ones you do not watch also cuts the work done on every poll.
 
 ## Develop
 
