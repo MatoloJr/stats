@@ -4,19 +4,19 @@ overview: Add a right-side network speed indicator, switch the narrow-panel floo
 todos:
   - id: network-indicator
     content: Add a /proc/net/dev sensor and a right-box indicator immediately after the clock
-    status: in_progress
+    status: completed
   - id: name-value-floor
     content: Change the narrow-panel floor from icon-plus-reading to name-plus-value
-    status: pending
+    status: completed
   - id: progress-cue
     content: Show a real progress fraction while Stats starts, stops, and while install.sh downloads
-    status: pending
+    status: completed
   - id: install-command
     content: Add install.sh and document the one-line curl install once a release URL exists
-    status: pending
+    status: completed
   - id: pressure-notify
     content: Notify only after a sustained CPU or memory warning, naming the top process and one next step
-    status: pending
+    status: completed
 isProject: false
 ---
 
