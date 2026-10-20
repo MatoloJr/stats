@@ -20,12 +20,23 @@ import {
     chooseHeadline,
     celsiusFromMilli,
 } from '../lib/sensors/temperature.js';
+import {parseNetDev, ratesFromDeltas, sumTraffic} from '../lib/sensors/network.js';
 import {
     formatBytes,
     formatPercent,
     formatRefreshHz,
     formatTemperature,
 } from '../lib/widgets/formatters.js';
+import {
+    average,
+    chooseOffender,
+    cpuShare,
+    isAboveBaseline,
+    isHot,
+    parseProcessStat,
+    parseResidentPages,
+    pressureCopy,
+} from '../lib/pressure.js';
 
 let failed = 0;
 
@@ -202,6 +213,36 @@ assert(formatBytes(0) === '0 B', 'zero bytes');
 assert(formatPercent(null) === 'n/a', 'missing percent');
 assert(formatTemperature(0, 'f') === '32°F', 'freezing in fahrenheit');
 assert(formatTemperature(54.2, 'c') === '54°C', 'celsius rounding');
+
+const netA = sumTraffic(parseNetDev(readFixture('netdev_a.txt')));
+const netB = sumTraffic(parseNetDev(readFixture('netdev_b.txt')));
+assert(netA.rxBytes === 1500 && netA.txBytes === 2250, 'loopback is excluded');
+const rates = ratesFromDeltas(netA, netB, 1);
+assert(rates.downBps === 2000 && rates.upBps === 0, 'download delta');
+assert(ratesFromDeltas(netB, netA, 1) === null, 'network counter wrap');
+assert(ratesFromDeltas(null, netA, 1) === null, 'first network sample has no rate');
+
+const processStat = parseProcessStat('1 (Web Content) S 0 0 0 0 0 0 0 0 0 0 10 5');
+assert(processStat.comm === 'Web Content' && processStat.ticks === 15, 'process comm and ticks');
+assert(parseProcessStat('nope') === null, 'bad process stat');
+assert(parseResidentPages('100 25 1 0 0 0 0') === 25, 'resident pages');
+assertClose(cpuShare(15, 115, 1, 100), 100, 'one second of one core');
+assert(cpuShare(115, 15, 1) === null, 'process tick wrap');
+assert(isHot({cpu: {usage: 80}, memory: {percent: 10}}, 70, 70) === 'cpu', 'cpu hot');
+assert(isHot({cpu: {usage: 10}, memory: {percent: 10}}, 70, 70) === null, 'cool machine');
+const offender = chooseOffender([
+    {comm: 'a', cpu: 10, memory: 90},
+    {comm: 'b', cpu: 40, memory: 5},
+], 'cpu');
+assert(offender.comm === 'b', 'busiest cpu');
+assert(isAboveBaseline(80, [10, 20]), 'well above its recent share');
+assert(!isAboveBaseline(30, [20]), 'one sample is not a baseline');
+assert(!isAboveBaseline(20, [5, 5]), 'below 25 percent stays quiet');
+assertClose(average([10, 20]), 15, 'baseline average');
+const copy = pressureCopy({comm: 'b', cpu: 80, memory: 5}, 'cpu', 15, false);
+assert(copy.body.includes('Quit it.') && !copy.body.includes('System Monitor'), 'no monitor offer');
+const monitored = pressureCopy({comm: 'b', cpu: 80, memory: 5}, 'cpu', 15, true);
+assert(monitored.body.includes('System Monitor'), 'monitor offer');
 
 if (failed > 0) {
     console.error(`${failed} test(s) failed`);

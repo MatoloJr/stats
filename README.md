@@ -13,6 +13,14 @@ make install
 make enable
 ```
 
+From this checkout, `./install.sh` does the same install and prints a four-step progress bar. A hosted release can be installed with one command:
+
+```bash
+curl -fsSL https://example.invalid/stats/install.sh | bash
+```
+
+That host does not serve the script yet. The script refuses to run as root, leaves your other extensions enabled, and still needs a logout on Wayland before the indicators appear.
+
 `make install` symlinks this directory to `~/.local/share/gnome-shell/extensions/stats@local/` and compiles the schema. Settings persist in dconf across logout.
 
 `make enable` turns Stats on when this Shell session already knows the extension. On a first install the running session has not scanned `~/.local/share/gnome-shell/extensions` yet, so `gnome-extensions enable` reports that `stats@local` does not exist and does not save the setting. `make enable` records the UUID in `org.gnome.shell enabled-extensions` (and removes it from `disabled-extensions`) and exits successfully. The top-bar indicator appears after you log out and back in.
@@ -51,8 +59,9 @@ Enable the extension inside that session with `gnome-extensions enable stats@loc
 - GPU vendor comes from `/sys/class/drm/card*/device/vendor`. A card whose runtime PM status is `suspended` is shown as `idle/off` and is not queried, so a sleeping discrete GPU is not woken up. NVIDIA samples come from one long-lived `nvidia-smi -l 1` process. AMD uses sysfs. Intel shows the current GT frequency from sysfs (`gt/gt0/rps_act_freq_mhz`, or `gt_act_freq_mhz` on older layouts) and engine utilisation only when `intel_gpu_top` runs.
 - Temperature is read from hwmon (Intel `coretemp` package, AMD `k10temp` Tctl/Tdie, NVMe composite, amdgpu) and from the `x86_pkg_temp` thermal zone. Values are converted from millidegrees. Thresholds are stored in Celsius.
 - Refresh rate comes from Mutter `GetCurrentState` on `org.gnome.Mutter.DisplayConfig`, updated by the `MonitorsChanged` signal rather than the poll timer. The figure is the **nominal mode rate**. Variable-refresh panels expose `refresh-rate-mode = variable`, but not the instantaneous rate, so Stats does not invent one.
+- Network speed sums `/proc/net/dev`, skipping loopback. The first sample is `n/a`. Down is received bytes per second and up is transmitted bytes per second.
 
-The top bar sits on the left by default, after the workspace indicator and before the clock. Change **Position** in preferences to move it; the indicator is recreated immediately. Index `20` on the left keeps it at the end of that side. Each metric shows its name, a percent or a temperature, and a speed, separated by `|`. On a narrow panel the row keeps the icon and the reading, then adds the name and the speed when they fit. If the readings themselves still meet the clock, refresh and temperature drop first. Compact mode shows the first enabled metric until the pointer hovers the indicator or the menu is open.
+The top bar sits on the left by default, after the workspace indicator and before the clock. Download and upload speeds sit on the right, immediately after the clock. Change **Position** in preferences to move the main indicator; the network chip stays on the right. Index `20` on the left keeps the main indicator at the end of that side. Each metric shows its name, a percent or a temperature, and a speed, separated by `|`. On a narrow panel the icon drops first, leaving the name and the value (`CPU 34%`), then the speed. If that still meets the clock, refresh and temperature drop first. Compact mode shows the first enabled metric until the pointer hovers the indicator or the menu is open. Resource warnings are off until **Resource warnings** is enabled in preferences.
 
 ## Develop
 
