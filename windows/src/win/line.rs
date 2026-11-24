@@ -1,13 +1,19 @@
-//! The activity line: a small translucent capsule at the top of the screen
-//! whose bars move with live system activity, like a voice meter. Click it
-//! for the readings strip; right-click for the menu.
+//! The activity line: an "island" on a screen edge (top centre, or the left
+//! or right side, drawn vertically) that moves with live system activity.
 //!
-//! It is a per-pixel-alpha layered window. The pixels are computed here
+//! At rest it is a hairline flush against the edge, a soft glow whose
+//! brightness and thickness follow activity, and the window lets every click
+//! through, so a browser's tabs underneath keep working. Rest the pointer on
+//! the hairline for a moment (or press a shortcut) and it wakes: it grows into
+//! a small capsule with voice-meter bars that you can click for the readings
+//! strip, or right-click for the menu. It sleeps again when the pointer
+//! leaves.
+//!
+//! It is a per-pixel-alpha layered window: the pixels are computed here
 //! (anti-aliased rounded shapes into a premultiplied 32-bit DIB) and handed to
-//! `UpdateLayeredWindow`, so edges stay smooth on any background and at any
-//! DPI. Its timer also drives the strip's fade and auto-close, so the app has
-//! one animation clock, which slows to 4 frames a second when nothing moves
-//! and stops while the line is hidden.
+//! `UpdateLayeredWindow`. Its timer is the app's one animation clock (it also
+//! drives the strip's fade and auto-close); it slows to 4 frames a second when
+//! nothing moves and stops while the line is hidden.
 
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
@@ -19,7 +25,6 @@ use windows_sys::Win32::UI::Controls::{
     TTS_NOPREFIX, TTTOOLINFOW,
 };
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::app::{guarded, now_ms, show_menu, with_app, App};
@@ -27,20 +32,29 @@ use super::draw;
 use super::util::wide;
 use stats_core::config::Level;
 use stats_core::numbers::fmt_percent;
-use stats_core::place::{self, Rect};
+use stats_core::place::{self, Anchor, Rect};
 use stats_core::wave;
 
 const CLASS: &str = "StatsForWindowsLine";
 const TIMER: usize = 1;
-const WM_MOUSELEAVE: u32 = 0x02A3;
-pub const COLUMNS: usize = 28;
-/// Window (hit area) and capsule sizes at 96 DPI.
-const WIN_W: i32 = 172;
-const WIN_H: i32 = 26;
-const CAP_W: i32 = 132;
-const CAP_H: i32 = 12;
-const CAP_W_HOVER: i32 = 152;
-const CAP_H_HOVER: i32 = 18;
+pub const COLUMNS: usize = 32;
+// Sizes at 96 DPI, along the edge (length) and away from it (depth).
+/// The window: room for the island when awake.
+const WIN_LEN: i32 = 250;
+const WIN_DEPTH: i32 = 34;
+/// Resting hairline.
+const REST_LEN: i32 = 220;
+const REST_THICK: i32 = 4;
+/// Awake island.
+const AWAKE_LEN: i32 = 244;
+const AWAKE_THICK: i32 = 26;
+const AWAKE_GAP: i32 = 3;
+/// How far from the edge the pointer counts as "on the hairline".
+const WAKE_BAND: i32 = 6;
+/// The pointer must rest this long on the hairline to wake it, so passing
+/// over it or clicking a tab under it never does.
+const WAKE_AFTER_MS: u64 = 350;
+const SLEEP_AFTER_MS: u64 = 600;
 // 20 frames a second: smooth for bars this small, at two thirds the cost of 30.
 const FAST_MS: u32 = 50;
 const SLOW_MS: u32 = 250;
@@ -53,19 +67,25 @@ pub struct State {
     /// Where the window is on screen.
     pub rect: Rect,
     pub visible: bool,
+    /// Grown into the island and taking clicks.
+    pub awake: bool,
+    /// The pointer is over the island (polled, not from mouse messages,
+    /// because a resting line receives none).
     pub hover: bool,
-    tracking: bool,
-    /// 0 = resting, 1 = fully grown for hover.
+    dwell_since: Option<u64>,
+    away_since: Option<u64>,
+    /// 0 = hairline, 1 = island.
     grow: f32,
+    click_through: bool,
     timer_ms: u32,
     last_frame: u64,
     last_sample: u64,
     pub started: u64,
     surface: Option<Surface>,
-    /// The capsule without its bars, reused while size, hover and level stay
-    /// the same, so most frames only draw the 28 small bars.
+    /// The background shape without its bars, reused while nothing about it
+    /// changes, so most frames only draw the bars.
     base: Vec<u32>,
-    base_key: Option<(i32, i32, u32, Level)>,
+    base_key: Option<(i32, i32, u32, Level, Anchor)>,
 }
 
 pub fn create(instance: HINSTANCE) -> Result<State, String> {
@@ -80,14 +100,14 @@ pub fn create(instance: HINSTANCE) -> Result<State, String> {
     unsafe { RegisterClassW(&wc) };
     let hwnd = unsafe {
         CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
             class.as_ptr(),
             wide("Stats activity").as_ptr(),
             WS_POPUP,
             0,
             0,
-            WIN_W,
-            WIN_H,
+            WIN_LEN,
+            WIN_DEPTH,
             null_mut(),
             null_mut(),
             instance,
@@ -121,7 +141,7 @@ pub fn create(instance: HINSTANCE) -> Result<State, String> {
             SendMessageW(tooltip, TTM_SETMAXTIPWIDTH, 0, 400);
         }
     }
-    Ok(State { hwnd, tooltip, started: now_ms(), ..Default::default() })
+    Ok(State { hwnd, tooltip, started: now_ms(), click_through: true, ..Default::default() })
 }
 
 fn tool_info(hwnd: HWND, text: &mut [u16]) -> TTTOOLINFOW {
@@ -169,8 +189,8 @@ pub fn place(app: &mut App) {
         app.bar_fonts = draw::Fonts::new(dpi);
     }
     let work = primary_work_area();
-    app.line.rect =
-        place::line_rect(work, scale(app, WIN_W), scale(app, WIN_H), app.config.bar_position, scale(app, 16));
+    app.line.rect = place::line_rect(work, scale(app, WIN_LEN), scale(app, WIN_DEPTH), app.config.bar_position);
+    app.line.base_key = None;
     render(app);
 }
 
@@ -190,6 +210,10 @@ pub fn hide(app: &mut App) {
         return;
     }
     app.line.visible = false;
+    app.line.awake = false;
+    app.line.hover = false;
+    app.line.grow = 0.0;
+    set_click_through(app, true);
     unsafe {
         KillTimer(app.line.hwnd, TIMER);
         ShowWindow(app.line.hwnd, SW_HIDE);
@@ -204,10 +228,32 @@ fn set_timer(app: &mut App, ms: u32) {
     }
 }
 
+fn set_click_through(app: &mut App, through: bool) {
+    if app.line.click_through == through {
+        return;
+    }
+    app.line.click_through = through;
+    unsafe {
+        let style = GetWindowLongW(app.line.hwnd, GWL_EXSTYLE) as u32;
+        let style = if through { style | WS_EX_TRANSPARENT } else { style & !WS_EX_TRANSPARENT };
+        SetWindowLongW(app.line.hwnd, GWL_EXSTYLE, style as i32);
+    }
+}
+
+/// Grow into the island now (pointer rested on it, or a shortcut).
+pub fn wake_island(app: &mut App) {
+    if !app.line.visible {
+        return;
+    }
+    app.line.awake = true;
+    app.line.away_since = None;
+    set_click_through(app, false);
+    wake(app);
+}
+
 /// Forget the hover (another window took over the pointer).
 pub fn release(app: &mut App) {
     app.line.hover = false;
-    app.line.tracking = false;
 }
 
 /// Make sure frames run fast (something just started moving).
@@ -224,7 +270,7 @@ pub fn update_tooltip(app: &App) {
     }
     let s = &app.snap;
     let mut text = wide(&format!(
-        "CPU {} · RAM {} · Commit {}\r\nClick for details · right-click for the menu",
+        "CPU {} · RAM {} · Commit {}\r\nClick for the readings · right-click for the menu",
         fmt_percent(s.cpu),
         fmt_percent(s.memory),
         fmt_percent(s.commit)
@@ -233,7 +279,47 @@ pub fn update_tooltip(app: &App) {
     unsafe { SendMessageW(app.line.tooltip, TTM_UPDATETIPTEXTW, 0, &mut info as *mut _ as LPARAM) };
 }
 
-/// One animation step: sample, ease, draw, and pick the next frame rate.
+/// Pointer tracking by polling: a click-through window gets no mouse
+/// messages, and polling the cursor once a frame costs next to nothing.
+fn track_pointer(app: &mut App, now: u64) {
+    let mut p = POINT { x: 0, y: 0 };
+    if unsafe { GetCursorPos(&mut p) } == 0 {
+        return;
+    }
+    let anchor = app.config.bar_position;
+    let band = place::edge_band(app.line.rect, anchor, scale(app, WAKE_BAND));
+    let on_band = band.contains(p.x, p.y);
+    let on_window = app.line.rect.contains(p.x, p.y);
+    app.line.hover = app.line.awake && on_window;
+
+    if !app.line.awake {
+        if on_band {
+            let since = *app.line.dwell_since.get_or_insert(now);
+            if now.saturating_sub(since) >= WAKE_AFTER_MS {
+                app.line.dwell_since = None;
+                wake_island(app);
+                super::bar::touch(app);
+            }
+        } else {
+            app.line.dwell_since = None;
+        }
+        return;
+    }
+    // Awake: stay so while the pointer is on it or the strip is open.
+    if on_window || app.strip.open {
+        app.line.away_since = None;
+        return;
+    }
+    let since = *app.line.away_since.get_or_insert(now);
+    if now.saturating_sub(since) >= SLEEP_AFTER_MS {
+        app.line.awake = false;
+        app.line.away_since = None;
+        set_click_through(app, true);
+    }
+}
+
+/// One animation step: sample, track the pointer, ease, draw, and pick the
+/// next frame rate.
 fn frame(app: &mut App) {
     let now = now_ms();
     let dt = now.saturating_sub(app.line.last_frame).min(500) as f32;
@@ -247,16 +333,20 @@ fn frame(app: &mut App) {
         app.wave.push(wave::activity(cpu, disk, net));
     }
     app.wave.advance(dt);
+    track_pointer(app, now);
 
-    let target = if app.line.hover { 1.0 } else { 0.0 };
-    let step = dt / 120.0;
+    let target = if app.line.awake { 1.0 } else { 0.0 };
+    let step = dt / 180.0;
     app.line.grow =
         if app.line.grow < target { (app.line.grow + step).min(target) } else { (app.line.grow - step).max(target) };
 
     let strip_moving = super::bar::animate(app, now, dt);
     render(app);
 
-    let busy = !app.wave.is_settled() || app.line.grow != target || strip_moving;
+    // Keep frames quick while the pointer is resting on the hairline, so it
+    // wakes on time.
+    let waiting = app.line.dwell_since.is_some() || (app.line.awake && app.line.away_since.is_some());
+    let busy = !app.wave.is_settled() || app.line.grow != target || strip_moving || waiting;
     set_timer(app, if busy { FAST_MS } else { SLOW_MS });
 }
 
@@ -312,6 +402,7 @@ struct Pixels<'a> {
     w: i32,
     h: i32,
     data: &'a mut [u32],
+    anchor: Anchor,
 }
 
 impl Pixels<'_> {
@@ -334,7 +425,7 @@ impl Pixels<'_> {
         self.data[i] = out_a | ch(16, r) | ch(8, g) | ch(0, b);
     }
 
-    /// Anti-aliased rounded rectangle (radius in px, float edges allowed).
+    /// Anti-aliased rounded rectangle in pixel coordinates.
     fn round_rect(&mut self, (x0, y0, x1, y1): (f32, f32, f32, f32), radius: f32, color: COLORREF, alpha: f32) {
         let r = radius.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
         let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
@@ -354,6 +445,22 @@ impl Pixels<'_> {
             }
         }
     }
+
+    /// The same, in edge coordinates: `u` along the edge, `v` away from it.
+    /// This is what lets one drawing serve the top and both sides.
+    fn edge_rect(&mut self, (u0, v0, u1, v1): (f32, f32, f32, f32), radius: f32, color: COLORREF, alpha: f32) {
+        let w = self.w as f32;
+        let rect = match self.anchor {
+            Anchor::Top => (u0, v0, u1, v1),
+            Anchor::Left => (v0, u0, v1, u1),
+            Anchor::Right => (w - v1, u0, w - v0, u1),
+        };
+        self.round_rect(rect, radius, color, alpha);
+    }
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 fn render(app: &mut App) {
@@ -372,47 +479,64 @@ fn render(app: &mut App) {
     let data = unsafe { std::slice::from_raw_parts_mut(surface.bits, (w * h) as usize) };
     let dpi = app.bar_fonts.dpi as i32;
     let s = move |v: i32| (v * dpi / 96) as f32;
+    let anchor = app.config.bar_position;
+    let length = if anchor == Anchor::Top { w } else { h } as f32;
 
-    // Capsule, growing a little on hover.
+    // Shape: a hairline on the edge growing into a capsule hanging from it.
     let g = ease(app.line.grow);
-    let cap_w = s(CAP_W) + (s(CAP_W_HOVER) - s(CAP_W)) * g;
-    let cap_h = s(CAP_H) + (s(CAP_H_HOVER) - s(CAP_H)) * g;
-    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
-    let (x0, y0, x1, y1) = (cx - cap_w / 2.0, cy - cap_h / 2.0, cx + cap_w / 2.0, cy + cap_h / 2.0);
+    let len = lerp(s(REST_LEN), s(AWAKE_LEN), g);
+    let thick = lerp(s(REST_THICK), s(AWAKE_THICK), g);
+    let gap = lerp(0.0, s(AWAKE_GAP), g);
+    let u0 = (length - len) / 2.0;
+    let u1 = u0 + len;
+    let (v0, v1) = (gap, gap + thick);
+    let mid_v = (v0 + v1) / 2.0;
     let level = app.worst_level();
     let signal = draw::signal_color(level);
-    let key = (w, h, (app.line.grow * 64.0) as u32, level);
+
+    let key = (w, h, (app.line.grow * 64.0) as u32, level, anchor);
     if app.line.base_key == Some(key) && app.line.base.len() == data.len() {
         data.copy_from_slice(&app.line.base);
     } else {
         data.fill(0);
-        let mut px = Pixels { w, h, data: &mut *data };
-        px.round_rect((x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0), cap_h / 2.0 + 1.0, draw::LINE, 0.55 + 0.3 * g);
-        px.round_rect((x0, y0, x1, y1), cap_h / 2.0, draw::BG, 0.86);
+        let mut px = Pixels { w, h, data: &mut *data, anchor };
+        // Resting: a faint dark rail so the glow reads on light pages too.
+        // Awake: the island, with a fine outline.
+        let rail = 0.30 + 0.56 * g;
+        if g > 0.02 {
+            px.edge_rect((u0 - 1.0, v0 - 1.0, u1 + 1.0, v1 + 1.0), thick / 2.0 + 1.0, draw::LINE, 0.7 * g);
+        }
+        px.edge_rect((u0, v0, u1, v1), thick / 2.0, draw::BG, rail);
         app.line.base.clear();
         app.line.base.extend_from_slice(data);
         app.line.base_key = Some(key);
     }
-    let mut px = Pixels { w, h, data };
+    let mut px = Pixels { w, h, data, anchor };
 
-    // Bars, mirrored around the middle like a voice meter.
+    // Activity: each column is a glow segment at rest and a bar when awake.
     let heights = app.wave.heights();
     let n = heights.len().max(1) as f32;
-    let inner_w = cap_w - cap_h; // keep clear of the rounded ends
-    let pitch = inner_w / n;
-    let bar_w = (pitch * 0.55).max(1.2);
-    let max_h = cap_h - s(4).max(3.0);
-    // A slow breath keeps the idle line looking alive (about 1% CPU-free).
+    let inset = lerp(thick * 0.4, thick * 0.55, g);
+    let pitch = (len - 2.0 * inset) / n;
+    let along = lerp(pitch * 0.92, (pitch * 0.5).max(1.2), g);
+    let max_cross = thick - lerp(1.0, s(8).max(6.0), g);
     let t = now_ms().saturating_sub(app.line.started) as f32 / 1000.0;
     let breath = 0.5 + 0.5 * (t * 1.6).sin();
-    let min_h = s(2).max(1.5) + 0.6 * breath;
+    let min_cross = lerp(1.2, s(2).max(1.5), g) + 0.5 * breath * g;
     for (i, &v) in heights.iter().enumerate() {
-        let bh = (min_h + v * (max_h - min_h)).min(max_h);
-        let bx = x0 + cap_h / 2.0 + pitch * (i as f32 + 0.5) - bar_w / 2.0;
-        // Older bars fade a touch, so the newest activity reads first.
+        let cross = (min_cross + v * (max_cross - min_cross)).clamp(min_cross, max_cross.max(min_cross));
+        let cu = u0 + inset + pitch * (i as f32 + 0.5);
+        // Newest on the right (top) or at the bottom (sides).
         let age = i as f32 / n;
-        let alpha = 0.45 + 0.55 * age.powf(0.6);
-        px.round_rect((bx, cy - bh / 2.0, bx + bar_w, cy + bh / 2.0), bar_w / 2.0, signal, alpha);
+        let glow = 0.35 + 0.65 * v.sqrt();
+        let bar = 0.45 + 0.55 * age.powf(0.6);
+        let alpha = lerp(glow, bar, g);
+        px.edge_rect(
+            (cu - along / 2.0, mid_v - cross / 2.0, cu + along / 2.0, mid_v + cross / 2.0),
+            along.min(cross) / 2.0,
+            signal,
+            alpha,
+        );
     }
 
     unsafe {
@@ -435,6 +559,16 @@ fn ease(t: f32) -> f32 {
     1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
 }
 
+/// Click on the awake island: the readings; if they are pinned open, the
+/// dashboard (so a pinned strip is never closed by accident).
+fn click(app: &mut App) {
+    if app.config.bar_pinned && app.strip.open {
+        super::dashboard::show(app);
+    } else {
+        super::bar::toggle(app);
+    }
+}
+
 unsafe extern "system" fn line_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     guarded(hwnd, msg, wparam, lparam, || match msg {
         WM_TIMER if wparam == TIMER => {
@@ -442,37 +576,19 @@ unsafe extern "system" fn line_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             Some(0)
         }
         WM_MOUSEACTIVATE => Some(MA_NOACTIVATE as LRESULT),
+        // Only reached while awake (asleep, the window is click-through).
         WM_MOUSEMOVE => {
             with_app(|app| {
-                if !app.line.tracking {
-                    let mut tme = TRACKMOUSEEVENT {
-                        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-                        dwFlags: TME_LEAVE,
-                        hwndTrack: hwnd,
-                        dwHoverTime: 0,
-                    };
-                    TrackMouseEvent(&mut tme);
-                    app.line.tracking = true;
-                }
-                if !app.line.hover {
-                    app.line.hover = true;
-                    super::bar::touch(app);
-                    wake(app);
-                }
-            });
-            Some(0)
-        }
-        WM_MOUSELEAVE => {
-            with_app(|app| {
-                app.line.tracking = false;
-                app.line.hover = false;
+                app.line.away_since = None;
                 super::bar::touch(app);
-                wake(app);
             });
             Some(0)
         }
         WM_LBUTTONUP => {
-            with_app(super::bar::toggle);
+            with_app(|app| {
+                wake_island(app);
+                click(app);
+            });
             Some(0)
         }
         WM_RBUTTONUP => {
@@ -485,4 +601,10 @@ unsafe extern "system" fn line_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         }
         _ => None,
     })
+}
+
+/// For the log, once at start: where the line went.
+pub fn describe(app: &App) -> String {
+    let r = app.line.rect;
+    format!("line at {} ({},{} {}x{})", app.config.bar_position.key(), r.left, r.top, r.width(), r.height())
 }

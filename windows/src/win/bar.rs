@@ -7,7 +7,6 @@ use std::mem::zeroed;
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::*;
-use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -25,7 +24,6 @@ const CLASS: &str = "StatsForWindowsBar";
 const WM_MOUSELEAVE: u32 = 0x02A3;
 /// Unpinned, the strip closes this long after the pointer leaves it.
 const LINGER_MS: u64 = 4000;
-const FADE_MS: f32 = 150.0;
 
 /// One metric as drawn: muted name, coloured value, muted speed.
 #[derive(Clone, Debug, Default)]
@@ -52,14 +50,16 @@ enum Button {
 #[derive(Default)]
 pub struct Strip {
     pub open: bool,
-    /// 0 = invisible, 1 = fully shown.
-    alpha: f32,
     shown: bool,
     hover: bool,
     tracking: bool,
     idle_since: u64,
     hot: Option<Button>,
+    /// Laid out with the strip (not while painting), so a click right after
+    /// it opens already lands on the right button.
     buttons: Vec<(RECT, Button)>,
+    /// Frosted glass is on (Windows 10 1803+ / 11).
+    pub glass: bool,
 }
 
 pub fn create(instance: HINSTANCE) -> Result<HWND, String> {
@@ -74,7 +74,7 @@ pub fn create(instance: HINSTANCE) -> Result<HWND, String> {
     unsafe { RegisterClassW(&wc) };
     let hwnd = unsafe {
         CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             class.as_ptr(),
             wide("Stats readings").as_ptr(),
             WS_POPUP,
@@ -91,13 +91,18 @@ pub fn create(instance: HINSTANCE) -> Result<HWND, String> {
     if hwnd.is_null() {
         return Err("could not create the readings strip".into());
     }
-    unsafe {
-        SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
-        let corner = DWMWCP_ROUND;
-        // Rounded corners on Windows 11; ignored on Windows 10.
-        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as u32, &corner as *const _ as *const _, 4);
-    }
     Ok(hwnd)
+}
+
+/// Frosted glass behind the strip (also sets rounded corners). Call once.
+pub fn enable_glass(app: &mut App) {
+    app.strip.glass = super::glass::enable(app.bar);
+}
+
+/// How see-through the frosted background is: `bar-opacity` 80..255 maps to
+/// a tint of roughly 20%..85%, so the blur always shows a little.
+fn tint(app: &App) -> u8 {
+    (app.config.bar_opacity as u32 * 215 / 255) as u8
 }
 
 fn pieces(app: &App) -> Vec<Piece> {
@@ -208,6 +213,16 @@ pub fn relayout(app: &mut App) {
     let width = content + 2 * pad + buttons;
     app.bar_layout = Layout { pieces: shown.iter().map(|&i| all[i].clone()).collect(), detail_full: full };
 
+    // Buttons, right to left: open dashboard, then pin.
+    let mid = (fonts.px(2) + height) / 2;
+    let mut right = width - fonts.px(6);
+    app.strip.buttons.clear();
+    for which in [Button::Open, Button::Pin] {
+        let r = RECT { left: right - button, top: mid - button / 2, right, bottom: mid + button / 2 };
+        app.strip.buttons.push((r, which));
+        right = r.left - fonts.px(4);
+    }
+
     let r = place::strip_rect(app.line.rect, width, height, work, app.config.bar_position, fonts.px(4));
     let mut now: RECT = unsafe { zeroed() };
     unsafe { GetWindowRect(app.bar, &mut now) };
@@ -269,15 +284,16 @@ pub fn touch(app: &mut App) {
 pub fn set_pinned(app: &mut App, pinned: bool) {
     app.config.bar_pinned = pinned;
     save_setting(app, "bar-pinned", if pinned { "true" } else { "false" });
+    super::util::log(if pinned { "pin on" } else { "pin off" });
     if pinned {
         open(app);
     }
     unsafe { InvalidateRect(app.bar, null(), 0) };
 }
 
-/// Called every line frame: fade in or out, close after lingering. Returns
-/// true while something is still moving.
-pub fn animate(app: &mut App, now: u64, dt: f32) -> bool {
+/// Called every line frame: show or hide, close after lingering. Returns
+/// true while something is still changing.
+pub fn animate(app: &mut App, now: u64, _dt: f32) -> bool {
     let strip = &mut app.strip;
     if strip.open && !app.config.bar_pinned && !strip.hover && !app.line.hover {
         if now.saturating_sub(strip.idle_since) > LINGER_MS {
@@ -286,32 +302,20 @@ pub fn animate(app: &mut App, now: u64, dt: f32) -> bool {
     } else {
         strip.idle_since = now;
     }
-    let target = if strip.open && app.line.visible { 1.0 } else { 0.0 };
-    if strip.alpha == target {
-        return false;
+    let want = strip.open && app.line.visible;
+    if want != strip.shown {
+        strip.shown = want;
+        unsafe { ShowWindow(app.bar, if want { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
     }
-    let step = dt / FADE_MS;
-    strip.alpha = if strip.alpha < target { (strip.alpha + step).min(1.0) } else { (strip.alpha - step).max(0.0) };
-    let alpha = (strip.alpha * app.config.bar_opacity as f32) as u8;
-    unsafe { SetLayeredWindowAttributes(app.bar, 0, alpha, LWA_ALPHA) };
-    if strip.alpha > 0.0 && !strip.shown {
-        strip.shown = true;
-        unsafe { ShowWindow(app.bar, SW_SHOWNOACTIVATE) };
-    } else if strip.alpha == 0.0 && strip.shown {
-        strip.shown = false;
-        unsafe { ShowWindow(app.bar, SW_HIDE) };
-    }
-    strip.alpha != target
+    false
 }
 
-/// Opacity changed in settings.
+/// Opacity (the frost tint) changed in settings.
 pub fn apply_opacity(app: &App) {
-    let alpha = (app.strip.alpha * app.config.bar_opacity as f32) as u8;
-    unsafe { SetLayeredWindowAttributes(app.bar, 0, alpha, LWA_ALPHA) };
+    unsafe { InvalidateRect(app.bar, null(), 0) };
 }
 
 pub fn hide_now(app: &mut App) {
-    app.strip.alpha = 0.0;
     app.strip.shown = false;
     unsafe { ShowWindow(app.bar, SW_HIDE) };
 }
@@ -319,10 +323,11 @@ pub fn hide_now(app: &mut App) {
 fn paint(app: &mut App, hwnd: HWND) {
     let fonts = &app.bar_fonts;
     let layout = &app.bar_layout;
-    let (pad, gap, inner, _, button) = metrics(fonts);
-    let mut canvas = Canvas::begin(hwnd);
+    let (pad, gap, inner, _, _) = metrics(fonts);
+    let mut canvas =
+        if app.strip.glass { Canvas::begin_glass(hwnd, &[(draw::BG, tint(app))]) } else { Canvas::begin(hwnd) };
     let full = RECT { left: 0, top: 0, right: canvas.width, bottom: canvas.height };
-    canvas.fill(full, draw::PANEL);
+    canvas.fill(full, draw::BG);
     canvas.fill(
         RECT { left: 0, top: 0, right: canvas.width, bottom: fonts.px(3) },
         draw::signal_color(app.worst_level()),
@@ -352,22 +357,22 @@ fn paint(app: &mut App, hwnd: HWND) {
         x += gap;
     }
 
-    // Pin and open-dashboard buttons on the right.
+    // Pin and open-dashboard buttons (laid out in `relayout`). A pinned strip
+    // shows a filled accent pin, so its state is obvious at a glance.
     let pinned = app.config.bar_pinned;
-    let mut right = canvas.width - fonts.px(6);
-    let mid = (top + bottom) / 2;
-    app.strip.buttons.clear();
-    for (which, glyph_char, color) in [
-        (Button::Open, glyph::CHEVRON_DOWN, draw::MUTED),
-        (Button::Pin, if pinned { glyph::PINNED } else { glyph::PIN }, if pinned { draw::ACCENT } else { draw::MUTED }),
-    ] {
-        let r = RECT { left: right - button, top: mid - button / 2, right, bottom: mid + button / 2 };
-        if app.strip.hot == Some(which) {
+    for &(r, which) in &app.strip.buttons {
+        let hot = app.strip.hot == Some(which);
+        let (glyph_char, color) = match which {
+            Button::Open => (glyph::CHEVRON_DOWN, if hot { draw::TEXT } else { draw::MUTED }),
+            Button::Pin if pinned => (glyph::PINNED, draw::ACCENT),
+            Button::Pin => (glyph::PIN, if hot { draw::TEXT } else { draw::MUTED }),
+        };
+        if which == Button::Pin && pinned {
+            canvas.round_rect(r, fonts.px(8), draw::ACCENT_DIM, None);
+        } else if hot {
             canvas.round_rect(r, fonts.px(8), draw::BUTTON_HOT, None);
         }
-        canvas.icon(fonts, glyph_char, r, if app.strip.hot == Some(which) { draw::TEXT } else { color });
-        app.strip.buttons.push((r, which));
-        right = r.left - fonts.px(4);
+        canvas.icon(fonts, glyph_char, r, color);
     }
 }
 

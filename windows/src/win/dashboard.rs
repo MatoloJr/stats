@@ -1,7 +1,11 @@
-//! The dashboard: a pop-up centred on the screen over a dimmed backdrop.
-//! Six live tiles up top, then every reading in folding cards with a button
-//! next to each problem that fixes it, then quick controls (position, pin,
-//! start with Windows...). It closes on Esc, the close button, or a click
+//! The dashboard: a frosted pop-up centred on the screen, with two tabs.
+//! **Overview**: six live tiles, then every reading in folding cards with a
+//! button next to each problem that fixes it. **Settings**: every option in
+//! `config.ini` as switches, steppers and chips (see `settings.rs`).
+//!
+//! Keyboard: Esc closes; 1 / 2 or Ctrl+Tab switch tabs; Tab and Shift+Tab
+//! move a focus ring, Enter or Space press the focused control; arrows,
+//! Page Up / Page Down, Home and End scroll. It also closes on a click
 //! outside. Folded cards are remembered in `collapsed-sections`.
 
 use std::mem::zeroed;
@@ -9,30 +13,34 @@ use std::ptr::{null, null_mut};
 use std::time::SystemTime;
 
 use windows_sys::Win32::Foundation::*;
-use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_ESCAPE};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::actions::{short_path, Action};
-use super::app::{guarded, save_setting, with_app, App, History};
+use super::app::{guarded, with_app, App, History};
 use super::draw::{self, glyph, Canvas, Fonts, MeasureDc};
 use super::util::{self, wide};
-use super::{bar, line};
+use super::{bar, hotkeys, line, settings};
 use stats_core::advice::{self, Fix};
-use stats_core::config::Level;
+use stats_core::config::{Level, Metric};
 use stats_core::history::Ring;
-use stats_core::numbers::{fmt_bytes, fmt_percent, fmt_rate, fmt_temp};
+use stats_core::hotkey::Command;
+use stats_core::numbers::{fmt_bytes, fmt_percent, fmt_rate, fmt_temp, TempUnit};
 use stats_core::pagefile::PageFile;
 use stats_core::place::{self, Anchor};
 
 const CLASS: &str = "StatsForWindowsDashboard";
-const SCRIM_CLASS: &str = "StatsForWindowsScrim";
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const WIDTH: i32 = 720;
-/// Backdrop darkness, 0..255.
-const SCRIM_ALPHA: u8 = 125;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Tab {
+    #[default]
+    Overview,
+    Settings,
+}
 
 #[derive(Default)]
 pub struct State {
@@ -46,16 +54,40 @@ pub struct State {
     /// the click would reopen it at once.
     pub hidden_at: u64,
     /// Start-with-Windows state, read when the dashboard opens.
-    autostart: bool,
+    pub autostart: bool,
+    pub tab: Tab,
+    /// Keyboard focus: an index into `hits`.
+    pub focus: Option<usize>,
+    /// Waiting for a key combination for this shortcut.
+    pub recording: Option<Command>,
+    /// Frosted glass is on.
+    pub glass: bool,
 }
 
+/// Something a control in the dashboard does. Run by `settings::run`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Control {
+    Tab(Tab),
     Position(Anchor),
     Pin,
     Autostart,
     HideFullscreen,
-    Settings,
+    ShowLine,
+    ShowSpeeds,
+    Notifications,
+    PagefileCheck,
+    Unit(TempUnit),
+    /// A stepper: setting key and direction (-1 or +1).
+    Step(&'static str, i64),
+    Metric(Metric),
+    Drive(char),
+    AddRoot,
+    RemoveRoot(usize),
+    Record(Command),
+    ClearHotkey(Command),
+    DefaultHotkey(Command),
+    ResetDefaults,
+    EditFile,
     Log,
     Scan,
     Exit,
@@ -72,7 +104,7 @@ pub enum Hit {
 }
 
 #[derive(Clone, Copy)]
-enum Spark {
+pub enum Spark {
     Cpu,
     Memory,
     Commit,
@@ -81,7 +113,7 @@ enum Spark {
     Disk,
 }
 
-struct Tile {
+pub struct Tile {
     label: String,
     value: String,
     detail: String,
@@ -91,8 +123,16 @@ struct Tile {
     section: &'static str,
 }
 
-enum Row {
-    /// Title, status chip, settings and close buttons.
+/// One shortcut's state, for its Settings row.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum KeyStatus {
+    Off,
+    Ready,
+    InUse,
+}
+
+pub enum Row {
+    /// Title, status chip, tabs, settings and close buttons.
     Hero,
     Tiles(Vec<Tile>),
     Header {
@@ -122,14 +162,48 @@ enum Row {
         text: String,
         color: COLORREF,
     },
-    Positions,
+    /// A segmented choice: options with their control and whether selected.
+    Choice {
+        label: String,
+        detail: String,
+        options: Vec<(String, Control, bool)>,
+    },
     Toggle {
         label: String,
         detail: String,
         on: bool,
         control: Control,
     },
-    Links,
+    /// − value + for one number setting.
+    Stepper {
+        label: String,
+        detail: String,
+        value: String,
+        key: &'static str,
+    },
+    /// Warning and critical steppers for one metric on one row.
+    Levels {
+        label: String,
+        warning: (String, &'static str),
+        critical: (String, &'static str),
+    },
+    /// Toggle chips that wrap onto several lines.
+    Chips {
+        label: String,
+        items: Vec<(String, bool, Control)>,
+    },
+    Folder {
+        path: String,
+        exists: bool,
+        index: usize,
+    },
+    Buttons(Vec<(char, String, Control)>),
+    Shortcut {
+        command: Command,
+        keys: String,
+        status: KeyStatus,
+        recording: bool,
+    },
     /// Bottom of a card and the space before the next one.
     CardEnd,
 }
@@ -239,7 +313,7 @@ fn tiles(app: &App) -> Vec<Tile> {
     ]
 }
 
-fn rows(app: &App) -> Vec<Row> {
+fn overview_rows(app: &App) -> Vec<Row> {
     let s = &app.snap;
     let c = &app.config;
     let collapsed = |id: &str| c.collapsed_sections.iter().any(|x| x == id);
@@ -520,29 +594,35 @@ fn rows(app: &App) -> Vec<Row> {
         }
     }
 
-    // What the right-click menu used to hold.
-    if header(&mut out, "controls", "Quick controls", c.bar_position.label().to_string()) {
-        out.push(Row::Positions);
-        out.push(Row::Toggle {
-            label: "Pin readings".into(),
-            detail: "Keep the strip under the line open".into(),
-            on: c.bar_pinned,
-            control: Control::Pin,
-        });
-        out.push(Row::Toggle {
-            label: "Start with Windows".into(),
-            detail: "Run Stats when you sign in".into(),
-            on: app.dash_state.autostart,
-            control: Control::Autostart,
-        });
-        out.push(Row::Toggle {
-            label: "Hide in full screen".into(),
-            detail: "Games and videos get the whole screen".into(),
-            on: c.hide_when_fullscreen,
-            control: Control::HideFullscreen,
-        });
-        out.push(Row::Links);
-        out.push(Row::CardEnd);
+    out
+}
+
+fn rows(app: &App) -> Vec<Row> {
+    match app.dash_state.tab {
+        Tab::Overview => overview_rows(app),
+        Tab::Settings => {
+            let mut out = vec![Row::Hero];
+            out.extend(settings::rows(app));
+            out
+        }
+    }
+}
+
+/// Chip rectangles for a `Chips` row, relative to its top-left content
+/// corner, wrapping at `width`. Shared by layout and painting.
+fn chip_rects(fonts: &Fonts, items: &[(String, bool, Control)], width: i32) -> Vec<RECT> {
+    let dc = MeasureDc::new(fonts.normal);
+    let (h, gap) = (fonts.px(30), fonts.px(8));
+    let (mut x, mut y) = (0, 0);
+    let mut out = Vec::with_capacity(items.len());
+    for (text, _, _) in items {
+        let w = dc.width(text) + fonts.px(40);
+        if x > 0 && x + w > width {
+            x = 0;
+            y += h + gap;
+        }
+        out.push(RECT { left: x, top: y, right: x + w, bottom: y + h });
+        x += w + gap;
     }
     out
 }
@@ -550,6 +630,7 @@ fn rows(app: &App) -> Vec<Row> {
 /// Row heights at the dashboard's DPI.
 fn heights(rows: &[Row], fonts: &Fonts, width: i32) -> Vec<i32> {
     let dc = MeasureDc::new(fonts.small);
+    let inner = width - 2 * fonts.px(18) - 2 * fonts.px(16);
     rows.iter()
         .map(|row| match row {
             Row::Hero => fonts.px(60),
@@ -562,15 +643,20 @@ fn heights(rows: &[Row], fonts: &Fonts, width: i32) -> Vec<i32> {
             Row::Spark { .. } => fonts.px(34),
             Row::Act { .. } => fonts.px(32),
             Row::Note { text, .. } => dc.paragraph_height(text, width - fonts.px(64)) + fonts.px(10),
-            Row::Positions => fonts.px(44),
-            Row::Toggle { .. } => fonts.px(44),
-            Row::Links => fonts.px(52),
+            Row::Choice { .. } | Row::Toggle { .. } | Row::Stepper { .. } | Row::Levels { .. } => fonts.px(48),
+            Row::Chips { items, .. } => {
+                let bottom = chip_rects(fonts, items, inner).last().map(|r| r.bottom).unwrap_or(0);
+                fonts.px(30) + bottom + fonts.px(10)
+            }
+            Row::Folder { .. } => fonts.px(36),
+            Row::Buttons(_) => fonts.px(52),
+            Row::Shortcut { .. } => fonts.px(48),
             Row::CardEnd => fonts.px(20),
         })
         .collect()
 }
 
-pub fn create(instance: HINSTANCE) -> Result<(HWND, HWND), String> {
+pub fn create(instance: HINSTANCE) -> Result<HWND, String> {
     let class = wide(CLASS);
     let wc = WNDCLASSW {
         lpfnWndProc: Some(dash_proc),
@@ -599,40 +685,12 @@ pub fn create(instance: HINSTANCE) -> Result<(HWND, HWND), String> {
     if hwnd.is_null() {
         return Err("could not create the dashboard window".into());
     }
-    let corner = DWMWCP_ROUND;
-    unsafe { DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as u32, &corner as *const _ as *const _, 4) };
+    Ok(hwnd)
+}
 
-    let scrim_class = wide(SCRIM_CLASS);
-    let wc = WNDCLASSW {
-        lpfnWndProc: Some(scrim_proc),
-        hInstance: instance,
-        lpszClassName: scrim_class.as_ptr(),
-        hCursor: unsafe { LoadCursorW(null_mut(), IDC_ARROW) },
-        hbrBackground: unsafe { GetStockObject(BLACK_BRUSH) } as HBRUSH,
-        ..unsafe { zeroed() }
-    };
-    unsafe { RegisterClassW(&wc) };
-    let scrim = unsafe {
-        CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_NOACTIVATE,
-            scrim_class.as_ptr(),
-            wide("Stats backdrop").as_ptr(),
-            WS_POPUP,
-            0,
-            0,
-            10,
-            10,
-            null_mut(),
-            null_mut(),
-            instance,
-            null(),
-        )
-    };
-    if scrim.is_null() {
-        return Err("could not create the dashboard backdrop".into());
-    }
-    unsafe { SetLayeredWindowAttributes(scrim, 0, SCRIM_ALPHA, LWA_ALPHA) };
-    Ok((hwnd, scrim))
+/// Frosted glass behind the dashboard (also sets rounded corners).
+pub fn enable_glass(app: &mut App) {
+    app.dash_state.glass = super::glass::enable(app.dash);
 }
 
 pub fn toggle(app: &mut App) {
@@ -644,10 +702,16 @@ pub fn toggle(app: &mut App) {
 }
 
 pub fn hide(app: &mut App) {
-    unsafe {
-        ShowWindow(app.dash, SW_HIDE);
-        ShowWindow(app.scrim, SW_HIDE);
+    if app.dash_state.recording.take().is_some() {
+        hotkeys::register_all(app);
     }
+    unsafe { ShowWindow(app.dash, SW_HIDE) };
+}
+
+/// Open on a given tab (or switch tab if it is already open).
+pub fn show_tab(app: &mut App, tab: Tab) {
+    app.dash_state.tab = tab;
+    show(app);
 }
 
 pub fn show(app: &mut App) {
@@ -660,7 +724,15 @@ pub fn show(app: &mut App) {
     bar::release(app);
     let fonts = &app.dash_fonts;
     let width = fonts.px(WIDTH);
-    let content: i32 = heights(&rows(app), fonts, width).iter().sum::<i32>() + fonts.px(16);
+    // Size for the taller tab, so switching tabs never resizes the window.
+    let tab = app.dash_state.tab;
+    let mut content = 0;
+    for t in [Tab::Overview, Tab::Settings] {
+        app.dash_state.tab = t;
+        let fonts = &app.dash_fonts;
+        content = content.max(heights(&rows(app), fonts, width).iter().sum::<i32>() + fonts.px(16));
+    }
+    app.dash_state.tab = tab;
 
     // Centred on the line's monitor, never taller than 80% of it.
     let monitor = unsafe { MonitorFromWindow(app.line.hwnd, MONITOR_DEFAULTTOPRIMARY) };
@@ -669,19 +741,10 @@ pub fn show(app: &mut App) {
     unsafe { GetMonitorInfoW(monitor, &mut info) };
     let w = info.rcWork;
     let r = place::centered(place::Rect::new(w.left, w.top, w.right, w.bottom), width, content, 0.8);
-    let m = info.rcMonitor;
     app.dash_state.scroll = 0;
     app.dash_state.hot = None;
+    app.dash_state.focus = None;
     unsafe {
-        SetWindowPos(
-            app.scrim,
-            HWND_TOPMOST,
-            m.left,
-            m.top,
-            m.right - m.left,
-            m.bottom - m.top,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        );
         SetWindowPos(app.dash, HWND_TOPMOST, r.left, r.top, r.width(), r.height(), SWP_SHOWWINDOW);
         SetForegroundWindow(app.dash);
         InvalidateRect(app.dash, null(), 0);
@@ -715,16 +778,40 @@ fn spark_ring(hist: &History, which: Spark) -> &Ring {
     }
 }
 
+/// A small button: rounded, hot state, centred label or glyph.
+fn small_button(canvas: &mut Canvas, fonts: &Fonts, r: RECT, text: &str, hot: bool, glyph_char: Option<char>) {
+    canvas.round_rect(
+        r,
+        fonts.px(10),
+        if hot { draw::BUTTON_HOT } else { draw::BUTTON },
+        Some(if hot { draw::ACCENT } else { draw::LINE }),
+    );
+    match glyph_char {
+        Some(g) => canvas.icon(fonts, g, r, if hot { draw::ACCENT } else { draw::TEXT }),
+        None => {
+            canvas.font(fonts.normal);
+            canvas.text_center(text, r, if hot { draw::ACCENT } else { draw::TEXT });
+        }
+    }
+}
+
 fn paint(app: &mut App, hwnd: HWND) {
     let list = rows(app);
     let (status_text, status_level) = status(app);
     let fonts = &app.dash_fonts;
-    let mut canvas = Canvas::begin(hwnd);
+    let mut canvas = if app.dash_state.glass {
+        // Window background mostly see-through, cards a little more solid.
+        Canvas::begin_glass(hwnd, &[(draw::BG, 150), (draw::PANEL, 205), (draw::PANEL_HOT, 220)])
+    } else {
+        Canvas::begin(hwnd)
+    };
     let full = RECT { left: 0, top: 0, right: canvas.width, bottom: canvas.height };
     canvas.fill(full, draw::BG);
     let sizes = heights(&list, fonts, canvas.width);
     let content: i32 = sizes.iter().sum::<i32>() + fonts.px(16);
     let max_scroll = (content - canvas.height).max(0);
+    let config = &app.config;
+    let hist = &app.hist;
     let state = &mut app.dash_state;
     state.scroll = state.scroll.clamp(0, max_scroll);
     state.content_height = content;
@@ -773,6 +860,7 @@ fn paint(app: &mut App, hwnd: HWND) {
         let next = state.hits.len();
         let hot_now = state.hot;
         let is_hot = move |offset: usize| hot_now == Some(next + offset);
+        let mid = (top + bottom) / 2;
         match row {
             Row::Hero => {
                 canvas.font(fonts.title);
@@ -780,7 +868,6 @@ fn paint(app: &mut App, hwnd: HWND) {
                 // Status chip.
                 canvas.font(fonts.small);
                 let chip_w = canvas.measure(&status_text) + fonts.px(30);
-                let mid = (top + bottom) / 2;
                 let chip = RECT {
                     left: x + fonts.px(12),
                     top: mid - fonts.px(12),
@@ -800,19 +887,59 @@ fn paint(app: &mut App, hwnd: HWND) {
                 };
                 canvas.round_rect(dot, fonts.px(6), chip_fg, None);
                 canvas.text(&status_text, dot.right + fonts.px(6), chip.top, chip.bottom, chip_fg);
-                // Settings and close.
+                // Close and settings, right to left.
                 let size = fonts.px(34);
                 let mut bx = card_r;
-                for (i, (g, control)) in
-                    [(glyph::CLOSE, Control::Close), (glyph::SETTINGS, Control::Settings)].into_iter().enumerate()
-                {
+                let mut offset = 0;
+                for (g, control) in [(glyph::CLOSE, Control::Close), (glyph::SETTINGS, Control::Tab(Tab::Settings))] {
                     let b = RECT { left: bx - size, top: mid - size / 2, right: bx, bottom: mid + size / 2 };
-                    if is_hot(i) {
-                        canvas.round_rect(b, fonts.px(10), draw::BUTTON_HOT, None);
+                    let selected = control == Control::Tab(Tab::Settings) && state.tab == Tab::Settings;
+                    if is_hot(offset) || selected {
+                        canvas.round_rect(
+                            b,
+                            fonts.px(10),
+                            if selected { draw::ACCENT_DIM } else { draw::BUTTON_HOT },
+                            None,
+                        );
                     }
-                    canvas.icon(fonts, g, b, if is_hot(i) { draw::TEXT } else { draw::MUTED });
+                    let color = if selected {
+                        draw::ACCENT
+                    } else if is_hot(offset) {
+                        draw::TEXT
+                    } else {
+                        draw::MUTED
+                    };
+                    canvas.icon(fonts, g, b, color);
                     state.hits.push((b, Hit::Control(control)));
                     bx = b.left - fonts.px(4);
+                    offset += 1;
+                }
+                // Tabs, centred between the chip and the buttons.
+                let seg_w = fonts.px(96);
+                let seg_h = fonts.px(30);
+                let total_w = 2 * seg_w + fonts.px(8);
+                let tl = ((chip.right + bx) / 2 - total_w / 2).max(chip.right + fonts.px(12));
+                let track = RECT {
+                    left: tl,
+                    top: mid - seg_h / 2 - fonts.px(4),
+                    right: tl + total_w,
+                    bottom: mid + seg_h / 2 + fonts.px(4),
+                };
+                canvas.round_rect(track, fonts.px(12), draw::PANEL, Some(draw::LINE));
+                for (i, (label, tab)) in
+                    [("Overview", Tab::Overview), ("Settings", Tab::Settings)].into_iter().enumerate()
+                {
+                    let l = track.left + fonts.px(4) + i as i32 * seg_w;
+                    let r = RECT { left: l, top: mid - seg_h / 2, right: l + seg_w, bottom: mid + seg_h / 2 };
+                    let selected = state.tab == tab;
+                    if selected {
+                        canvas.round_rect(r, fonts.px(10), draw::ACCENT_DIM, None);
+                    } else if is_hot(offset + i) {
+                        canvas.round_rect(r, fonts.px(10), draw::BUTTON_HOT, None);
+                    }
+                    canvas.font(if selected { fonts.bold } else { fonts.normal });
+                    canvas.text_center(label, r, if selected { draw::ACCENT } else { draw::TEXT });
+                    state.hits.push((r, Hit::Control(Control::Tab(tab))));
                 }
             }
             Row::Tiles(tiles) => {
@@ -852,7 +979,7 @@ fn paint(app: &mut App, hwnd: HWND) {
                         r.top + fonts.px(70),
                         draw::MUTED,
                     );
-                    let values: Vec<f32> = spark_ring(&app.hist, t.spark).values().collect();
+                    let values: Vec<f32> = spark_ring(hist, t.spark).values().collect();
                     let spark = RECT {
                         left: r.left + inset,
                         top: r.bottom - fonts.px(24),
@@ -896,7 +1023,7 @@ fn paint(app: &mut App, hwnd: HWND) {
                 canvas.text_right(value, right, top, bottom, draw::level_color(*level));
             }
             Row::Spark { which, max, color } => {
-                let values: Vec<f32> = spark_ring(&app.hist, *which).values().collect();
+                let values: Vec<f32> = spark_ring(hist, *which).values().collect();
                 let area = RECT { left, top: top + fonts.px(4), right, bottom: bottom - fonts.px(4) };
                 canvas.round_rect(area, fonts.px(8), draw::BG, None);
                 canvas.sparkline(
@@ -932,42 +1059,35 @@ fn paint(app: &mut App, hwnd: HWND) {
                     RECT { left: card_l + fonts.px(4), top: top + fonts.px(4), right: card_r - fonts.px(4), bottom };
                 canvas.paragraph(text, rect, *color, false);
             }
-            Row::Positions => {
-                canvas.font(fonts.normal);
-                canvas.text("Line position", left, top, bottom, draw::TEXT);
-                let seg_w = fonts.px(78);
+
+            Row::Choice { label, detail, options } => {
+                draw_label(&mut canvas, fonts, label, detail, left, top, bottom);
+                let seg_w = fonts.px(104);
                 let seg_h = fonts.px(30);
-                let mid = (top + bottom) / 2;
-                let total = RECT {
-                    left: right - 3 * seg_w - fonts.px(8),
+                let n = options.len() as i32;
+                let track = RECT {
+                    left: right - n * seg_w - fonts.px(8),
                     top: mid - seg_h / 2 - fonts.px(4),
                     right,
                     bottom: mid + seg_h / 2 + fonts.px(4),
                 };
-                canvas.round_rect(total, fonts.px(12), draw::BG, Some(draw::LINE));
-                for (i, anchor) in Anchor::ALL.into_iter().enumerate() {
-                    let l = total.left + fonts.px(4) + i as i32 * seg_w;
+                canvas.round_rect(track, fonts.px(12), draw::BG, Some(draw::LINE));
+                for (i, (text, control, selected)) in options.iter().enumerate() {
+                    let l = track.left + fonts.px(4) + i as i32 * seg_w;
                     let r = RECT { left: l, top: mid - seg_h / 2, right: l + seg_w, bottom: mid + seg_h / 2 };
-                    let selected = app.config.bar_position == anchor;
-                    let hot = is_hot(i);
-                    if selected {
+                    if *selected {
                         canvas.round_rect(r, fonts.px(10), draw::ACCENT_DIM, None);
-                    } else if hot {
+                    } else if is_hot(i) {
                         canvas.round_rect(r, fonts.px(10), draw::BUTTON_HOT, None);
                     }
-                    canvas.font(if selected { fonts.bold } else { fonts.normal });
-                    canvas.text_center(anchor.label(), r, if selected { draw::ACCENT } else { draw::TEXT });
-                    state.hits.push((r, Hit::Control(Control::Position(anchor))));
+                    canvas.font(if *selected { fonts.bold } else { fonts.normal });
+                    canvas.text_center(text, r, if *selected { draw::ACCENT } else { draw::TEXT });
+                    state.hits.push((r, Hit::Control(*control)));
                 }
             }
             Row::Toggle { label, detail, on, control } => {
                 let hot = is_hot(0);
-                let mid = (top + bottom) / 2;
-                canvas.font(fonts.normal);
-                canvas.text(label, left, top + fonts.px(4), mid + fonts.px(2), draw::TEXT);
-                canvas.font(fonts.small);
-                canvas.text(detail, left, mid, bottom - fonts.px(4), draw::MUTED);
-                // Switch.
+                draw_label(&mut canvas, fonts, label, detail, left, top, bottom);
                 let (sw, sh) = (fonts.px(40), fonts.px(22));
                 let s = RECT { left: right - sw, top: mid - sh / 2, right, bottom: mid + sh / 2 };
                 let track = if *on {
@@ -988,19 +1108,78 @@ fn paint(app: &mut App, hwnd: HWND) {
                 );
                 state.hits.push((RECT { left: card_l, top, right: card_r, bottom }, Hit::Control(*control)));
             }
-            Row::Links => {
-                let mid = (top + bottom) / 2;
+            Row::Stepper { label, detail, value, key } => {
+                draw_label(&mut canvas, fonts, label, detail, left, top, bottom);
+                let hit = stepper(&mut canvas, fonts, right, mid, value, key, (is_hot(0), is_hot(1)));
+                state.hits.extend(hit);
+            }
+            Row::Levels { label, warning, critical } => {
+                canvas.font(fonts.normal);
+                canvas.text(label, left, top, bottom, draw::TEXT);
+                let crit_hits =
+                    stepper(&mut canvas, fonts, right, mid, &critical.0, critical.1, (is_hot(0), is_hot(1)));
+                let crit_left = crit_hits[0].0.left;
+                canvas.font(fonts.small);
+                canvas.text_right("Critical", crit_left - fonts.px(8), top, bottom, draw::CRIT);
+                let warn_right = crit_left - fonts.px(70);
+                let warn_hits =
+                    stepper(&mut canvas, fonts, warn_right, mid, &warning.0, warning.1, (is_hot(2), is_hot(3)));
+                let warn_left = warn_hits[0].0.left;
+                canvas.font(fonts.small);
+                canvas.text_right("Warning", warn_left - fonts.px(8), top, bottom, draw::WARN);
+                state.hits.extend(crit_hits);
+                state.hits.extend(warn_hits);
+            }
+            Row::Chips { label, items } => {
+                canvas.font(fonts.normal);
+                canvas.text(label, left, top, top + fonts.px(30), draw::TEXT);
+                let origin = (left, top + fonts.px(30));
+                for (i, (r, (text, on, control))) in
+                    chip_rects(fonts, items, right - left).into_iter().zip(items).enumerate()
+                {
+                    let r = RECT {
+                        left: r.left + origin.0,
+                        top: r.top + origin.1,
+                        right: r.right + origin.0,
+                        bottom: r.bottom + origin.1,
+                    };
+                    let hot = is_hot(i);
+                    let (bg, fg, edge) = if *on {
+                        (draw::ACCENT_DIM, draw::ACCENT, draw::ACCENT)
+                    } else {
+                        (
+                            if hot { draw::BUTTON_HOT } else { draw::BG },
+                            if hot { draw::TEXT } else { draw::MUTED },
+                            draw::LINE,
+                        )
+                    };
+                    canvas.round_rect(r, r.bottom - r.top, bg, Some(edge));
+                    let icon = RECT { left: r.left + fonts.px(8), right: r.left + fonts.px(26), ..r };
+                    canvas.icon(fonts, if *on { glyph::CHECK } else { glyph::ADD }, icon, fg);
+                    canvas.font(if *on { fonts.bold } else { fonts.normal });
+                    canvas.text(text, r.left + fonts.px(28), r.top, r.bottom, fg);
+                    state.hits.push((r, Hit::Control(*control)));
+                }
+            }
+            Row::Folder { path, exists, index } => {
+                canvas.font(fonts.normal);
+                let b = RECT { left: right - fonts.px(80), top: mid - fonts.px(14), right, bottom: mid + fonts.px(14) };
+                let icon = RECT { left, top, right: left + fonts.px(20), bottom };
+                canvas.icon(fonts, glyph::FOLDER, icon, if *exists { draw::ACCENT } else { draw::WARN });
+                canvas.font(fonts.normal);
+                let text_right = b.left - fonts.px(12);
+                canvas.text_clipped(path, icon.right + fonts.px(8), text_right, top, bottom, draw::TEXT);
+                if !exists {
+                    canvas.font(fonts.small);
+                    canvas.text_right("not found", text_right, top, bottom, draw::WARN);
+                }
+                small_button(&mut canvas, fonts, b, "Remove", is_hot(0), None);
+                state.hits.push((b, Hit::Control(Control::RemoveRoot(*index))));
+            }
+            Row::Buttons(buttons) => {
                 let bh = fonts.px(32);
                 let mut x = left;
-                for (i, (g, text, control)) in [
-                    (glyph::SEARCH, "Scan build folders", Control::Scan),
-                    (glyph::SETTINGS, "Edit settings", Control::Settings),
-                    (glyph::DOCUMENT, "Open log", Control::Log),
-                    (glyph::POWER, "Exit Stats", Control::Exit),
-                ]
-                .into_iter()
-                .enumerate()
-                {
+                for (i, (g, text, control)) in buttons.iter().enumerate() {
                     canvas.font(fonts.normal);
                     let w = canvas.measure(text) + fonts.px(44);
                     let b = RECT { left: x, top: mid - bh / 2, right: x + w, bottom: mid + bh / 2 };
@@ -1009,9 +1188,10 @@ fn paint(app: &mut App, hwnd: HWND) {
                         b,
                         fonts.px(10),
                         if hot { draw::BUTTON_HOT } else { draw::BUTTON },
-                        Some(draw::LINE),
+                        Some(if hot { draw::ACCENT } else { draw::LINE }),
                     );
-                    let color = if control == Control::Exit && hot {
+                    let danger = matches!(control, Control::Exit | Control::ResetDefaults);
+                    let color = if danger && hot {
                         draw::CRIT
                     } else if hot {
                         draw::ACCENT
@@ -1020,18 +1200,84 @@ fn paint(app: &mut App, hwnd: HWND) {
                     };
                     canvas.icon(
                         fonts,
-                        g,
+                        *g,
                         RECT { left: b.left + fonts.px(8), right: b.left + fonts.px(28), ..b },
                         color,
                     );
                     canvas.font(fonts.normal);
                     canvas.text(text, b.left + fonts.px(32), b.top, b.bottom, color);
-                    state.hits.push((b, Hit::Control(control)));
+                    state.hits.push((b, Hit::Control(*control)));
                     x = b.right + fonts.px(8);
                 }
             }
+            Row::Shortcut { command, keys, status, recording } => {
+                let detail = match status {
+                    KeyStatus::InUse => "In use by another app: choose another",
+                    KeyStatus::Off => "Off",
+                    KeyStatus::Ready => "",
+                };
+                draw_label(&mut canvas, fonts, command.label(), detail, left, top, bottom);
+                if *status == KeyStatus::InUse {
+                    // Re-draw the detail in amber.
+                    canvas.font(fonts.small);
+                    canvas.text(detail, left, mid, bottom - fonts.px(4), draw::WARN);
+                }
+                let bh = fonts.px(30);
+                let mut x = right;
+                for (i, (text, control)) in [
+                    ("Default", Control::DefaultHotkey(*command)),
+                    ("Clear", Control::ClearHotkey(*command)),
+                    ("Change", Control::Record(*command)),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    canvas.font(fonts.normal);
+                    let w = canvas.measure(text) + fonts.px(24);
+                    let b = RECT { left: x - w, top: mid - bh / 2, right: x, bottom: mid + bh / 2 };
+                    small_button(&mut canvas, fonts, b, text, is_hot(i), None);
+                    state.hits.push((b, Hit::Control(control)));
+                    x = b.left - fonts.px(6);
+                }
+                // The key combination, as a key cap.
+                canvas.font(fonts.mono_bold);
+                let shown = if *recording {
+                    "Press keys…".to_string()
+                } else if keys.is_empty() {
+                    "—".to_string()
+                } else {
+                    keys.clone()
+                };
+                let w = canvas.measure(&shown) + fonts.px(24);
+                let cap =
+                    RECT { left: x - fonts.px(6) - w, top: mid - bh / 2, right: x - fonts.px(6), bottom: mid + bh / 2 };
+                canvas.round_rect(
+                    cap,
+                    fonts.px(8),
+                    if *recording { draw::ACCENT_DIM } else { draw::BG },
+                    Some(if *recording { draw::ACCENT } else { draw::LINE }),
+                );
+                canvas.font(fonts.mono_bold);
+                canvas.text_center(&shown, cap, if *recording { draw::ACCENT } else { draw::TEXT });
+            }
             // Drawn in the first pass.
             Row::CardEnd => {}
+        }
+    }
+    let _ = (config, hist);
+    // Keyboard focus ring.
+    if let Some(i) = state.focus {
+        if let Some((r, _)) = state.hits.get(i) {
+            let ring = RECT { left: r.left - 3, top: r.top - 3, right: r.right + 3, bottom: r.bottom + 3 };
+            let pen = unsafe { CreatePen(PS_SOLID, 2, draw::ACCENT) };
+            unsafe {
+                let old_pen = SelectObject(canvas.dc, pen);
+                let old_brush = SelectObject(canvas.dc, GetStockObject(NULL_BRUSH));
+                RoundRect(canvas.dc, ring.left, ring.top, ring.right, ring.bottom, fonts.px(12), fonts.px(12));
+                SelectObject(canvas.dc, old_brush);
+                SelectObject(canvas.dc, old_pen);
+                DeleteObject(pen);
+            }
         }
     }
     // Scroll hint when more is below.
@@ -1043,65 +1289,182 @@ fn paint(app: &mut App, hwnd: HWND) {
     }
 }
 
+/// Label on the left with a small detail line under it.
+fn draw_label(canvas: &mut Canvas, fonts: &Fonts, label: &str, detail: &str, left: i32, top: i32, bottom: i32) {
+    let mid = (top + bottom) / 2;
+    canvas.font(fonts.normal);
+    if detail.is_empty() {
+        canvas.text(label, left, top, bottom, draw::TEXT);
+    } else {
+        canvas.text(label, left, top + fonts.px(4), mid + fonts.px(2), draw::TEXT);
+        canvas.font(fonts.small);
+        canvas.text(detail, left, mid, bottom - fonts.px(4), draw::MUTED);
+    }
+}
+
+/// − value + ending at `right`. Returns the two button hits (minus, plus).
+fn stepper(
+    canvas: &mut Canvas,
+    fonts: &Fonts,
+    right: i32,
+    mid: i32,
+    value: &str,
+    key: &'static str,
+    hot: (bool, bool),
+) -> Vec<(RECT, Hit)> {
+    let (bw, bh, vw) = (fonts.px(30), fonts.px(30), fonts.px(78));
+    let plus = RECT { left: right - bw, top: mid - bh / 2, right, bottom: mid + bh / 2 };
+    let value_box = RECT { left: plus.left - vw, top: plus.top, right: plus.left, bottom: plus.bottom };
+    let minus = RECT { left: value_box.left - bw, top: plus.top, right: value_box.left, bottom: plus.bottom };
+    small_button(canvas, fonts, minus, "−", hot.0, None);
+    small_button(canvas, fonts, plus, "+", hot.1, None);
+    canvas.font(fonts.bold);
+    canvas.text_center(value, value_box, draw::TEXT);
+    vec![(minus, Hit::Control(Control::Step(key, -1))), (plus, Hit::Control(Control::Step(key, 1)))]
+}
+
 fn hit_at(app: &App, x: i32, y: i32) -> Option<usize> {
     app.dash_state.hits.iter().position(|(r, _)| x >= r.left && x < r.right && y >= r.top && y < r.bottom)
 }
 
-/// Run a quick control. Called with the app released, since some of these
-/// open other programs or close Stats.
-fn control(which: Control) {
-    match which {
-        Control::Close => {
-            with_app(hide);
-        }
-        Control::Settings => {
-            with_app(|app| app.queue(Action::OpenSettingsFile));
-        }
-        Control::Scan => {
-            with_app(|app| app.queue(Action::ScanJunk));
-        }
-        Control::Log => util::shell_open("notepad.exe", Some(&format!("\"{}\"", util::log_path().display()))),
-        Control::Exit => {
-            if let Some(main) = with_app(|app| app.main) {
-                unsafe { PostMessageW(main, WM_CLOSE, 0, 0) };
-            }
-        }
-        Control::Autostart => {
-            let on = util::autostart_enabled();
-            if !util::set_autostart(!on) {
-                util::log("could not change the startup setting");
-            }
-            with_app(|app| app.dash_state.autostart = util::autostart_enabled());
-        }
-        Control::Pin => {
+/// Do what a hit target does. Called with the app released.
+fn activate(hwnd: HWND, hit: Hit) {
+    match hit {
+        Hit::Section(id) => {
             with_app(|app| {
-                let pinned = !app.config.bar_pinned;
-                bar::set_pinned(app, pinned);
+                app.toggle_section(&id);
+                unsafe { InvalidateRect(hwnd, null(), 0) };
             });
         }
-        Control::HideFullscreen => {
+        Hit::Act(action) => {
+            with_app(|app| app.queue(action));
+        }
+        Hit::Jump(id) => {
             with_app(|app| {
-                app.config.hide_when_fullscreen = !app.config.hide_when_fullscreen;
-                let value = app.config.hide_when_fullscreen.to_string();
-                save_setting(app, "hide-when-fullscreen", &value);
+                jump(app, id);
+                unsafe { InvalidateRect(hwnd, null(), 0) };
             });
         }
-        Control::Position(anchor) => {
-            with_app(|app| set_position(app, anchor));
-        }
+        Hit::Control(c) => settings::run(c),
     }
-    with_app(|app| unsafe {
-        InvalidateRect(app.dash, null(), 0);
-    });
 }
 
-pub fn set_position(app: &mut App, anchor: Anchor) {
-    app.config.bar_position = anchor;
-    save_setting(app, "bar-position", anchor.key());
-    line::place(app);
-    if app.strip.open {
-        bar::relayout(app);
+/// While recording a shortcut: turn a key press into a new combination.
+/// Returns true when the key was used.
+fn record_key(vk: u32) -> bool {
+    let Some(command) = with_app(|app| app.dash_state.recording).flatten() else { return false };
+    let modifier = [
+        VK_CONTROL,
+        VK_MENU,
+        VK_SHIFT,
+        VK_LWIN,
+        VK_RWIN,
+        VK_LCONTROL,
+        VK_RCONTROL,
+        VK_LMENU,
+        VK_RMENU,
+        VK_LSHIFT,
+        VK_RSHIFT,
+    ]
+    .iter()
+    .any(|&m| m as u32 == vk);
+    if modifier {
+        return true;
     }
+    with_app(|app| {
+        if vk == VK_ESCAPE as u32 {
+            app.dash_state.recording = None;
+            hotkeys::register_all(app);
+        } else {
+            let mods = hotkeys::mods_down();
+            if let (Some(key), true) = (hotkeys::key_for(vk), mods.any()) {
+                app.dash_state.recording = None;
+                hotkeys::set(app, command, Some(stats_core::hotkey::Hotkey { mods, key }));
+            }
+        }
+        unsafe { InvalidateRect(app.dash, null(), 0) };
+    });
+    true
+}
+
+/// Keyboard use of the dashboard. Returns true when the key was handled.
+fn key(hwnd: HWND, vk: u32) -> bool {
+    if record_key(vk) {
+        return true;
+    }
+    let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
+    let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
+    let vk16 = vk as u16;
+    let tab_to = |tab: Tab| {
+        with_app(|app| {
+            app.dash_state.tab = tab;
+            app.dash_state.scroll = 0;
+            app.dash_state.focus = None;
+        });
+    };
+    match vk16 {
+        VK_ESCAPE => {
+            with_app(hide);
+        }
+        VK_TAB if ctrl => {
+            let tab = with_app(|app| app.dash_state.tab).unwrap_or_default();
+            tab_to(if tab == Tab::Overview { Tab::Settings } else { Tab::Overview });
+        }
+        0x31 => tab_to(Tab::Overview),
+        0x32 => tab_to(Tab::Settings),
+        VK_OEM_COMMA if ctrl => tab_to(Tab::Settings),
+        VK_TAB => {
+            with_app(|app| {
+                let n = app.dash_state.hits.len();
+                if n > 0 {
+                    let i = match app.dash_state.focus {
+                        None => {
+                            if shift {
+                                n - 1
+                            } else {
+                                0
+                            }
+                        }
+                        Some(i) if shift => (i + n - 1) % n,
+                        Some(i) => (i + 1) % n,
+                    };
+                    app.dash_state.focus = Some(i);
+                }
+            });
+        }
+        VK_RETURN | VK_SPACE => {
+            let hit =
+                with_app(|app| app.dash_state.focus.and_then(|i| app.dash_state.hits.get(i).map(|h| h.1.clone())))
+                    .flatten();
+            if let Some(hit) = hit {
+                activate(hwnd, hit);
+            }
+        }
+        VK_UP | VK_DOWN | VK_PRIOR | VK_NEXT | VK_HOME | VK_END => {
+            with_app(|app| {
+                let page = {
+                    let mut r: RECT = unsafe { zeroed() };
+                    unsafe { GetClientRect(hwnd, &mut r) };
+                    (r.bottom - r.top) * 9 / 10
+                };
+                let line = app.dash_fonts.px(48);
+                let s = &mut app.dash_state;
+                s.scroll = match vk16 {
+                    VK_UP => s.scroll - line,
+                    VK_DOWN => s.scroll + line,
+                    VK_PRIOR => s.scroll - page,
+                    VK_NEXT => s.scroll + page,
+                    VK_HOME => 0,
+                    _ => i32::MAX / 2,
+                }
+                .max(0);
+                s.focus = None;
+            });
+        }
+        _ => return false,
+    }
+    unsafe { InvalidateRect(hwnd, null(), 0) };
+    true
 }
 
 unsafe extern "system" fn dash_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -1158,25 +1521,13 @@ unsafe extern "system" fn dash_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             Some(0)
         }
         WM_LBUTTONUP => {
-            let hit = with_app(|app| hit_at(app, x, y).map(|i| app.dash_state.hits[i].1.clone())).flatten();
-            match hit {
-                Some(Hit::Section(id)) => {
-                    with_app(|app| {
-                        app.toggle_section(&id);
-                        InvalidateRect(hwnd, null(), 0);
-                    });
-                }
-                Some(Hit::Act(action)) => {
-                    with_app(|app| app.queue(action));
-                }
-                Some(Hit::Jump(id)) => {
-                    with_app(|app| {
-                        jump(app, id);
-                        InvalidateRect(hwnd, null(), 0);
-                    });
-                }
-                Some(Hit::Control(c)) => control(c),
-                None => {}
+            let hit = with_app(|app| {
+                app.dash_state.focus = None;
+                hit_at(app, x, y).map(|i| app.dash_state.hits[i].1.clone())
+            })
+            .flatten();
+            if let Some(hit) = hit {
+                activate(hwnd, hit);
             }
             Some(0)
         }
@@ -1191,9 +1542,13 @@ unsafe extern "system" fn dash_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             }
             Some(0)
         }
-        WM_KEYDOWN if wparam == VK_ESCAPE as usize => {
-            with_app(hide);
-            Some(0)
+        // Alt combinations arrive as system keys; take them while recording.
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            if key(hwnd, wparam as u32) {
+                Some(0)
+            } else {
+                None
+            }
         }
         WM_CLOSE => {
             with_app(hide);
@@ -1202,21 +1557,6 @@ unsafe extern "system" fn dash_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         WM_DPICHANGED => {
             with_app(|app| app.dash_fonts = Fonts::new(GetDpiForWindow(hwnd)));
             None
-        }
-        _ => None,
-    })
-}
-
-/// The dimmed backdrop: a click on it closes the dashboard.
-unsafe extern "system" fn scrim_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    guarded(hwnd, msg, wparam, lparam, || match msg {
-        WM_MOUSEACTIVATE => Some(MA_NOACTIVATE as LRESULT),
-        WM_LBUTTONDOWN | WM_RBUTTONDOWN => {
-            with_app(|app| {
-                app.dash_state.hidden_at = super::app::now_ms();
-                hide(app);
-            });
-            Some(0)
         }
         _ => None,
     })

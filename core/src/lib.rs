@@ -11,6 +11,7 @@ pub mod config;
 pub mod counters;
 pub mod fit;
 pub mod history;
+pub mod hotkey;
 pub mod junk;
 pub mod numbers;
 pub mod pagefile;

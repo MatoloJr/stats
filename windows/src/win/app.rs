@@ -24,7 +24,7 @@ use super::actions::{self, Action, Done, Reply, WM_APP_WAKE};
 use super::draw::Fonts;
 use super::sensors::{CpuMeter, Sensors, Snapshot};
 use super::util::{self, wide};
-use super::{bar, dashboard, icon, line, procs, tray};
+use super::{bar, dashboard, hotkeys, icon, line, procs, settings, tray};
 use stats_core::advice;
 use stats_core::config::{self, Config, Level};
 use stats_core::history::Ring;
@@ -90,8 +90,8 @@ pub struct App {
     /// The readings strip.
     pub bar: HWND,
     pub dash: HWND,
-    /// Dimmed backdrop behind the dashboard.
-    pub scrim: HWND,
+    /// Whether each global shortcut registered (None = off or not tried).
+    pub hotkey_ok: [Option<bool>; 5],
     pub line: line::State,
     pub strip: bar::Strip,
     pub wave: Wave,
@@ -236,8 +236,15 @@ pub fn create(instance: HINSTANCE) -> Result<(), String> {
     let (config, config_mtime) = load_config();
     let main = create_main_window(instance)?;
     let bar = bar::create(instance)?;
-    let (dash, scrim) = dashboard::create(instance)?;
+    let dash = dashboard::create(instance)?;
     let line = line::create(instance)?;
+    // COM, for the folder picker in Settings.
+    unsafe {
+        windows_sys::Win32::System::Com::CoInitializeEx(
+            null(),
+            windows_sys::Win32::System::Com::COINIT_APARTMENTTHREADED as u32,
+        )
+    };
     // Pause the animation while the screen is locked.
     unsafe {
         windows_sys::Win32::System::RemoteDesktop::WTSRegisterSessionNotification(
@@ -259,7 +266,7 @@ pub fn create(instance: HINSTANCE) -> Result<(), String> {
         main,
         bar,
         dash,
-        scrim,
+        hotkey_ok: [None; 5],
         line,
         strip: bar::Strip::default(),
         wave: Wave::new(line::COLUMNS),
@@ -304,10 +311,19 @@ pub fn create(instance: HINSTANCE) -> Result<(), String> {
     APP.with(|cell| *cell.borrow_mut() = Some(app));
     unsafe { SetTimer(main, TIMER_ID, interval, None) };
     with_app(|app| {
+        bar::enable_glass(app);
+        dashboard::enable_glass(app);
         app.tick();
         if app.config.bar_pinned {
             bar::open(app);
         }
+        hotkeys::register_all(app);
+        let shortcuts = app.hotkey_ok.iter().filter(|ok| **ok == Some(true)).count();
+        util::log(&format!(
+            "{}; frosted glass {}; {shortcuts} shortcuts ready",
+            line::describe(app),
+            if app.strip.glass && app.dash_state.glass { "on" } else { "off" }
+        ));
     });
     Ok(())
 }
@@ -491,24 +507,50 @@ impl App {
         if config == self.config {
             return;
         }
-        let interval_changed = config.poll_interval_ms != self.config.poll_interval_ms;
-        let moved = config.bar_position != self.config.bar_position;
-        let pinned = config.bar_pinned && !self.config.bar_pinned;
-        let capacity = (config.history_seconds * 1000 / config.poll_interval_ms).max(2) as usize;
-        self.config = config;
-        self.hist.resize(capacity);
-        if interval_changed {
-            unsafe { SetTimer(self.main, TIMER_ID, self.config.poll_interval_ms, None) };
-        }
-        bar::apply_opacity(self);
-        if moved {
-            line::place(self);
-        }
-        if pinned {
-            bar::open(self);
-        }
+        let old = std::mem::replace(&mut self.config, config);
+        self.apply_config(&old);
         self.status = Some(("Settings reloaded.".into(), true));
         util::log("settings reloaded");
+    }
+
+    /// `config.ini` was just written by Stats itself: don't reload it.
+    pub fn note_config_written(&mut self) {
+        self.config_mtime = std::fs::metadata(util::config_path()).and_then(|m| m.modified()).ok();
+    }
+
+    /// Make a settings change take effect (`old` is the settings before it).
+    pub fn apply_config(&mut self, old: &Config) {
+        let c = &self.config;
+        if c.poll_interval_ms != old.poll_interval_ms {
+            unsafe { SetTimer(self.main, TIMER_ID, c.poll_interval_ms, None) };
+        }
+        if (c.history_seconds, c.poll_interval_ms) != (old.history_seconds, old.poll_interval_ms) {
+            let capacity = (c.history_seconds * 1000 / c.poll_interval_ms).max(2) as usize;
+            self.hist.resize(capacity);
+        }
+        if self.config.bar_opacity != old.bar_opacity {
+            bar::apply_opacity(self);
+        }
+        if self.config.bar_position != old.bar_position {
+            line::place(self);
+        }
+        if self.config.bar_pinned && !old.bar_pinned {
+            bar::open(self);
+        }
+        if self.config.hotkeys != old.hotkeys {
+            hotkeys::register_all(self);
+        }
+        if self.config.bar_metrics != old.bar_metrics
+            || self.config.bar_show_speeds != old.bar_show_speeds
+            || self.config.storage_drives != old.storage_drives
+        {
+            // New readings: sample now so the strip and tiles update at once.
+            self.snap = self.sensors.sample(&self.config.storage_drives);
+            if self.strip.open {
+                bar::relayout(self);
+            }
+        }
+        self.update_overlay();
     }
 
     fn fullscreen_app_running(&self) -> bool {
@@ -522,8 +564,8 @@ impl App {
 
     /// Show or hide the activity line and the strip, once a poll.
     pub fn update_overlay(&mut self) {
-        // While our own dashboard is open its full-screen backdrop would
-        // read as "a full-screen app is running", so skip that check then.
+        // While our own dashboard is in front, Windows may count it as "busy",
+        // so skip the full-screen check then.
         let hide = self.locked
             || !self.config.bar_visible
             || (self.config.hide_when_fullscreen && !self.dash_visible() && self.fullscreen_app_running());
@@ -534,6 +576,11 @@ impl App {
         }
         line::show(self);
         line::update_tooltip(self);
+        // A pinned strip comes back whenever the line does (after a game,
+        // a locked screen, or turning the line off and on).
+        if self.config.bar_pinned && !self.strip.open {
+            bar::open(self);
+        }
         if self.strip.open {
             bar::relayout(self);
         }
@@ -837,7 +884,7 @@ pub fn show_menu() {
     };
     match choice {
         MENU_DASH => {
-            with_app(dashboard::show);
+            with_app(|app| dashboard::show_tab(app, dashboard::Tab::Overview));
         }
         MENU_SCAN => {
             with_app(|app| app.queue(Action::ScanJunk));
@@ -854,7 +901,7 @@ pub fn show_menu() {
             with_app(|app| bar::set_pinned(app, !pinned));
         }
         n if (MENU_POSITION..MENU_POSITION + Anchor::ALL.len()).contains(&n) => {
-            with_app(|app| dashboard::set_position(app, Anchor::ALL[n - MENU_POSITION]));
+            settings::run(dashboard::Control::Position(Anchor::ALL[n - MENU_POSITION]));
         }
         MENU_AUTOSTART => {
             if !util::set_autostart(!autostart) {
@@ -862,7 +909,7 @@ pub fn show_menu() {
             }
         }
         MENU_SETTINGS => {
-            with_app(|app| app.queue(Action::OpenSettingsFile));
+            with_app(|app| dashboard::show_tab(app, dashboard::Tab::Settings));
         }
         MENU_LOG => util::shell_open("notepad.exe", Some(&format!("\"{}\"", util::log_path().display()))),
         MENU_EXIT => unsafe {
@@ -889,6 +936,10 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             }
             WM_APP_SHOW_DASH => {
                 with_app(dashboard::show);
+                Some(0)
+            }
+            WM_HOTKEY => {
+                hotkeys::handle(wparam);
                 Some(0)
             }
             super::tray::WM_APP_TRAY => {
@@ -929,6 +980,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             WM_QUERYENDSESSION => Some(1),
             WM_DESTROY => {
                 with_app(|app| {
+                    hotkeys::unregister_all(app.main);
                     windows_sys::Win32::System::RemoteDesktop::WTSUnRegisterSessionNotification(app.main);
                     tray::remove(app.main);
                     icon::destroy(app.icon);

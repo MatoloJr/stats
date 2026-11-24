@@ -65,6 +65,10 @@ pub mod glyph {
     pub const POWER: char = '\u{E7E8}';
     pub const SEARCH: char = '\u{E721}';
     pub const DOCUMENT: char = '\u{E8A5}';
+    pub const CHECK: char = '\u{E73E}';
+    pub const ADD: char = '\u{E710}';
+    pub const FOLDER: char = '\u{E8B7}';
+    pub const REFRESH: char = '\u{E72C}';
 }
 
 pub struct Fonts {
@@ -181,10 +185,23 @@ pub struct Canvas {
     old_font: HGDIOBJ,
     pub width: i32,
     pub height: i32,
+    /// For frosted windows: the pixels, and how see-through each surface
+    /// colour is (colour, alpha 0..255). Everything else ends up opaque.
+    glass: Option<(*mut u32, Vec<(COLORREF, u8)>)>,
 }
 
 impl Canvas {
     pub fn begin(hwnd: HWND) -> Self {
+        Self::open(hwnd, None)
+    }
+
+    /// Paint for a window with `glass::enable` on: pixels left in one of the
+    /// `surfaces` colours get that alpha, so the blur shows through them.
+    pub fn begin_glass(hwnd: HWND, surfaces: &[(COLORREF, u8)]) -> Self {
+        Self::open(hwnd, Some(surfaces.to_vec()))
+    }
+
+    fn open(hwnd: HWND, surfaces: Option<Vec<(COLORREF, u8)>>) -> Self {
         unsafe {
             let mut ps: PAINTSTRUCT = zeroed();
             let window_dc = BeginPaint(hwnd, &mut ps);
@@ -193,10 +210,59 @@ impl Canvas {
             let width = (rect.right - rect.left).max(1);
             let height = (rect.bottom - rect.top).max(1);
             let dc = CreateCompatibleDC(window_dc);
-            let bitmap = CreateCompatibleBitmap(window_dc, width, height);
+            let (bitmap, glass) = match surfaces {
+                Some(surfaces) => {
+                    let mut info: BITMAPINFO = zeroed();
+                    info.bmiHeader = BITMAPINFOHEADER {
+                        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                        biWidth: width,
+                        biHeight: -height,
+                        biPlanes: 1,
+                        biBitCount: 32,
+                        biCompression: BI_RGB,
+                        ..zeroed()
+                    };
+                    let mut bits: *mut core::ffi::c_void = null_mut();
+                    let bitmap = CreateDIBSection(window_dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+                    if bitmap.is_null() || bits.is_null() {
+                        (CreateCompatibleBitmap(window_dc, width, height), None)
+                    } else {
+                        (bitmap, Some((bits as *mut u32, surfaces)))
+                    }
+                }
+                None => (CreateCompatibleBitmap(window_dc, width, height), None),
+            };
             let old_bitmap = SelectObject(dc, bitmap);
             SetBkMode(dc, TRANSPARENT as i32);
-            Canvas { hwnd, ps, window_dc, dc, bitmap, old_bitmap, old_font: null_mut(), width, height }
+            Canvas { hwnd, ps, window_dc, dc, bitmap, old_bitmap, old_font: null_mut(), width, height, glass }
+        }
+    }
+
+    /// Give every pixel its alpha (premultiplied) before it goes on screen.
+    fn apply_glass(&self) {
+        let Some((bits, surfaces)) = &self.glass else { return };
+        // DIB pixels are 0xAARRGGBB; COLORREF is 0x00BBGGRR.
+        let keys: Vec<(u32, u32)> = surfaces
+            .iter()
+            .map(|&(c, a)| {
+                let (r, g, b) = parts(c);
+                (((r as u32) << 16) | ((g as u32) << 8) | b as u32, a as u32)
+            })
+            .collect();
+        unsafe {
+            GdiFlush();
+            // SAFETY: the DIB holds width*height pixels while selected.
+            let pixels = std::slice::from_raw_parts_mut(*bits, (self.width * self.height) as usize);
+            for p in pixels.iter_mut() {
+                let rgb = *p & 0x00FF_FFFF;
+                *p = match keys.iter().find(|(k, _)| *k == rgb) {
+                    Some(&(_, a)) => {
+                        let ch = |shift: u32| ((((rgb >> shift) & 0xFF) * a / 255) & 0xFF) << shift;
+                        (a << 24) | ch(16) | ch(8) | ch(0)
+                    }
+                    None => 0xFF00_0000 | rgb,
+                };
+            }
         }
     }
 
@@ -336,6 +402,7 @@ impl Canvas {
 
 impl Drop for Canvas {
     fn drop(&mut self) {
+        self.apply_glass();
         unsafe {
             BitBlt(self.window_dc, 0, 0, self.width, self.height, self.dc, 0, 0, SRCCOPY);
             if !self.old_font.is_null() {

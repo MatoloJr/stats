@@ -5,6 +5,7 @@
 //! thing. Unknown keys are ignored and bad values fall back to the default,
 //! with a warning written to the log, so a typo can never stop Stats starting.
 
+use crate::hotkey::{Command, Hotkey};
 use crate::numbers::TempUnit;
 use crate::place::Anchor;
 
@@ -106,6 +107,12 @@ pub struct Config {
     pub auto_clean_temp_days: u32,
     pub history_seconds: u32,
     pub collapsed_sections: Vec<String>,
+    /// Global shortcuts, indexed by `Command::index()`. `None` = off.
+    pub hotkeys: [Option<Hotkey>; 5],
+}
+
+fn default_hotkeys() -> [Option<Hotkey>; 5] {
+    Command::ALL.map(|c| Hotkey::parse(c.default_text()))
 }
 
 impl Default for Config {
@@ -123,7 +130,7 @@ impl Default for Config {
             ],
             bar_show_speeds: true,
             bar_visible: true,
-            bar_position: Anchor::Center,
+            bar_position: Anchor::Top,
             bar_pinned: false,
             bar_opacity: 250,
             hide_when_fullscreen: true,
@@ -144,6 +151,7 @@ impl Default for Config {
             auto_clean_temp_days: 0,
             history_seconds: 120,
             collapsed_sections: Vec::new(),
+            hotkeys: default_hotkeys(),
         }
     }
 }
@@ -151,15 +159,16 @@ impl Default for Config {
 /// Written the first time Stats runs. Parsing this text must give exactly
 /// `Config::default()` (checked by a test).
 pub const DEFAULT_TEXT: &str = r#"# Stats for Windows settings.
-# Edit and save: Stats reloads this file within a couple of seconds.
-# Lines starting with # are comments. A bad value falls back to its default.
+# Most of these can be changed in Stats itself: open the dashboard, then
+# Settings. Edit and save here instead and Stats reloads within a couple of
+# seconds. Lines starting with # are comments. A bad value uses its default.
 
-# How often the bar refreshes, in milliseconds (500 to 10000).
+# How often the readings refresh, in milliseconds (500 to 10000).
 poll-interval-ms = 1000
 
-# The activity line sits at the top of the screen: left, center or right.
-# Click it to drop down the readings strip.
-bar-position = center
+# Where the activity line sits: top (centred), left or right (vertical).
+# Rest the pointer on it to wake it, then click for the readings strip.
+bar-position = top
 # Keep the readings strip open instead of hiding it a few seconds after use.
 bar-pinned = false
 # Show the activity line at all.
@@ -222,6 +231,14 @@ history-seconds = 120
 
 # Dashboard sections you folded away (managed by Stats).
 collapsed-sections =
+
+# Keyboard shortcuts that work from any app. Combine ctrl, alt, shift or win
+# with a letter, digit, F1-F24 or , . / ; - =  Leave empty to turn one off.
+hotkey-dashboard = ctrl+alt+s
+hotkey-readings = ctrl+alt+r
+hotkey-settings = ctrl+alt+,
+hotkey-pin = ctrl+alt+p
+hotkey-line = ctrl+alt+h
 "#;
 
 /// Result of parsing: the settings plus a note for every value that was
@@ -340,6 +357,14 @@ pub fn parse(text: &str) -> Parsed {
             "auto-clean-temp-days" => ranged!(config.auto_clean_temp_days, 0, 365, u32),
             "history-seconds" => ranged!(config.history_seconds, 30, 3600, u32),
             "collapsed-sections" => config.collapsed_sections = split_list(value, &[',']),
+            k if k.starts_with("hotkey-") => match Command::ALL.iter().find(|c| c.key() == k) {
+                Some(command) if value.is_empty() => config.hotkeys[command.index()] = None,
+                Some(command) => match Hotkey::parse(value) {
+                    Some(hotkey) => config.hotkeys[command.index()] = Some(hotkey),
+                    None => bad = true,
+                },
+                None => warnings.push(format!("line {}: unknown setting '{key}'", number + 1)),
+            },
             _ => warnings.push(format!("line {}: unknown setting '{key}'", number + 1)),
         }
         if bad {
@@ -361,6 +386,177 @@ pub fn parse(text: &str) -> Parsed {
         }
     }
     Parsed { config, warnings }
+}
+
+/// A number the Settings screen changes with − and + buttons. The ranges
+/// are the same ones `parse` accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stepper {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub min: i64,
+    pub max: i64,
+    pub step: i64,
+    pub unit: &'static str,
+}
+
+const fn stepper(key: &'static str, label: &'static str, min: i64, max: i64, step: i64, unit: &'static str) -> Stepper {
+    Stepper { key, label, min, max, step, unit }
+}
+
+pub const STEPPERS: &[Stepper] = &[
+    stepper("poll-interval-ms", "Refresh every", 500, 10_000, 250, "ms"),
+    stepper("history-seconds", "Graph history", 30, 3600, 30, "s"),
+    stepper("bar-opacity", "Readings opacity", 80, 255, 15, ""),
+    stepper("notify-quiet-minutes", "Quiet time between alerts", 1, 1440, 5, "min"),
+    stepper("scan-interval-hours", "Rescan build folders every", 0, 24 * 30, 6, "h"),
+    stepper("junk-alert-gb", "Alert when a build folder passes", 1, 10_000, 5, "GB"),
+    stepper("auto-clean-temp-days", "Delete Temp files older than", 0, 365, 1, "days"),
+    stepper("cpu-warning", "CPU warning", 1, 100, 1, "%"),
+    stepper("cpu-critical", "CPU critical", 1, 100, 1, "%"),
+    stepper("memory-warning", "RAM warning", 1, 100, 1, "%"),
+    stepper("memory-critical", "RAM critical", 1, 100, 1, "%"),
+    stepper("commit-warning", "Commit warning", 1, 100, 1, "%"),
+    stepper("commit-critical", "Commit critical", 1, 100, 1, "%"),
+    stepper("storage-warning", "Storage warning", 1, 100, 1, "%"),
+    stepper("storage-critical", "Storage critical", 1, 100, 1, "%"),
+    stepper("gpu-warning", "GPU warning", 1, 100, 1, "%"),
+    stepper("gpu-critical", "GPU critical", 1, 100, 1, "%"),
+    stepper("temp-warning", "Temperature warning", 20, 150, 1, "°C"),
+    stepper("temp-critical", "Temperature critical", 20, 150, 1, "°C"),
+];
+
+pub fn find_stepper(key: &str) -> Option<&'static Stepper> {
+    STEPPERS.iter().find(|s| s.key == key)
+}
+
+impl Config {
+    fn limits_mut(&mut self, name: &str) -> Option<&mut Limits> {
+        Some(match name {
+            "cpu" => &mut self.cpu,
+            "memory" => &mut self.memory,
+            "commit" => &mut self.commit,
+            "storage" => &mut self.storage,
+            "gpu" => &mut self.gpu,
+            "temp" => &mut self.temp,
+            _ => return None,
+        })
+    }
+
+    /// The current value of a stepper setting.
+    pub fn number(&self, key: &str) -> Option<i64> {
+        Some(match key {
+            "poll-interval-ms" => self.poll_interval_ms as i64,
+            "history-seconds" => self.history_seconds as i64,
+            "bar-opacity" => self.bar_opacity as i64,
+            "notify-quiet-minutes" => self.notify_quiet_minutes as i64,
+            "scan-interval-hours" => self.scan_interval_hours as i64,
+            "junk-alert-gb" => self.junk_alert_gb as i64,
+            "auto-clean-temp-days" => self.auto_clean_temp_days as i64,
+            _ => {
+                let (name, which) = key.rsplit_once('-')?;
+                let limits = match name {
+                    "cpu" => self.cpu,
+                    "memory" => self.memory,
+                    "commit" => self.commit,
+                    "storage" => self.storage,
+                    "gpu" => self.gpu,
+                    "temp" => self.temp,
+                    _ => return None,
+                };
+                match which {
+                    "warning" => limits.warning as i64,
+                    "critical" => limits.critical as i64,
+                    _ => return None,
+                }
+            }
+        })
+    }
+
+    /// Move a stepper setting `steps` steps (negative = down), clamped to its
+    /// range, keeping each warning level below its critical level. Returns
+    /// the new value when it changed.
+    pub fn step(&mut self, key: &str, steps: i64) -> Option<i64> {
+        let s = find_stepper(key)?;
+        let current = self.number(key)?;
+        let (mut min, mut max) = (s.min, s.max);
+        if let Some((name, which)) = key.rsplit_once('-') {
+            if let Some(limits) = self.limits_mut(name) {
+                match which {
+                    "warning" => max = max.min(limits.critical as i64 - 1),
+                    "critical" => min = min.max(limits.warning as i64 + 1),
+                    _ => {}
+                }
+            }
+        }
+        // Snap to the step grid from the minimum, so 500 + 250k stays tidy.
+        let raw = current + steps * s.step;
+        let snapped = if steps == 0 { raw } else { min + ((raw - min) as f64 / s.step as f64).round() as i64 * s.step };
+        let value = snapped.clamp(min, max.max(min));
+        if value == current {
+            return None;
+        }
+        match key {
+            "poll-interval-ms" => self.poll_interval_ms = value as u32,
+            "history-seconds" => self.history_seconds = value as u32,
+            "bar-opacity" => self.bar_opacity = value as u8,
+            "notify-quiet-minutes" => self.notify_quiet_minutes = value as u32,
+            "scan-interval-hours" => self.scan_interval_hours = value as u32,
+            "junk-alert-gb" => self.junk_alert_gb = value as u32,
+            "auto-clean-temp-days" => self.auto_clean_temp_days = value as u32,
+            _ => {
+                let (name, which) = key.rsplit_once('-')?;
+                let limits = self.limits_mut(name)?;
+                match which {
+                    "warning" => limits.warning = value as u8,
+                    _ => limits.critical = value as u8,
+                }
+            }
+        }
+        Some(value)
+    }
+
+    /// Show or hide a metric on the strip, keeping the standard order. At
+    /// least one metric always stays.
+    pub fn toggle_metric(&mut self, metric: Metric) {
+        if let Some(pos) = self.bar_metrics.iter().position(|&m| m == metric) {
+            if self.bar_metrics.len() > 1 {
+                self.bar_metrics.remove(pos);
+            }
+        } else {
+            self.bar_metrics.push(metric);
+            self.bar_metrics.sort_by_key(|m| Metric::ALL.iter().position(|x| x == m));
+        }
+    }
+
+    /// Watch or stop watching a drive, keeping at least one.
+    pub fn toggle_drive(&mut self, drive: &str) {
+        let Some(drive) = normalize_drive(drive) else { return };
+        if let Some(pos) = self.storage_drives.iter().position(|d| *d == drive) {
+            if self.storage_drives.len() > 1 {
+                self.storage_drives.remove(pos);
+            }
+        } else {
+            self.storage_drives.push(drive);
+        }
+    }
+
+    /// Settings-file text for the list settings.
+    pub fn metrics_text(&self) -> String {
+        self.bar_metrics.iter().map(|m| m.key()).collect::<Vec<_>>().join(", ")
+    }
+
+    pub fn drives_text(&self) -> String {
+        self.storage_drives.join(", ")
+    }
+
+    pub fn scan_roots_text(&self) -> String {
+        self.scan_roots.join("; ")
+    }
+
+    pub fn hotkey_text(&self, command: Command) -> String {
+        self.hotkeys[command.index()].map(|h| h.key_text()).unwrap_or_default()
+    }
 }
 
 /// `c`, `C:`, `C:\` -> `C:`.
@@ -455,12 +651,12 @@ mod tests {
         let parsed = parse("bar-metrics = commit, cpu, bogus, cpu\nbar-x = 1200\nbar-y = \nstorage-drives = c:\\, d\nscan-roots = C:\\a; D:\\b c\n");
         assert_eq!(parsed.config.bar_metrics, vec![Metric::Commit, Metric::Cpu]);
         // Old drag positions are accepted silently.
-        assert_eq!(parsed.config.bar_position, Anchor::Center);
+        assert_eq!(parsed.config.bar_position, Anchor::Top);
         let placed = parse("bar-position = Right\nbar-pinned = yes\n");
         assert!(placed.warnings.is_empty(), "{:?}", placed.warnings);
         assert_eq!(placed.config.bar_position, Anchor::Right);
         assert!(placed.config.bar_pinned);
-        assert_eq!(parse("bar-position = top\n").warnings.len(), 1);
+        assert_eq!(parse("bar-position = bottom\n").warnings.len(), 1);
         assert_eq!(parsed.config.storage_drives, vec!["C:", "D:"]);
         assert_eq!(parsed.config.scan_roots, vec!["C:\\a", "D:\\b c"]);
         assert_eq!(parsed.warnings.len(), 1);
@@ -473,6 +669,57 @@ mod tests {
         assert_eq!(out, "# bar-x = 5\nbar-x = 640\nother = 1\n");
         let appended = set_value("a = 1\n", "bar-y", "10");
         assert_eq!(appended, "a = 1\nbar-y = 10\n");
+    }
+
+    #[test]
+    fn steppers_clamp_and_keep_levels_ordered() {
+        let mut c = Config::default();
+        assert_eq!(c.step("poll-interval-ms", 1), Some(1250));
+        assert_eq!(c.step("poll-interval-ms", -100), Some(500));
+        assert_eq!(c.step("poll-interval-ms", -1), None, "already at the minimum");
+        // Warning can't reach critical, and critical can't drop to warning.
+        c.commit = Limits::new(90, 92);
+        assert_eq!(c.step("commit-warning", 5), Some(91));
+        assert_eq!(c.step("commit-critical", -5), None, "already one above warning");
+        assert_eq!(c.commit, Limits::new(91, 92));
+        assert_eq!(c.step("temp-critical", 100), Some(150));
+        assert_eq!(c.number("temp-critical"), Some(150));
+        assert_eq!(c.step("nope", 1), None);
+        // Every stepper reads a value and its default parses within range.
+        let d = Config::default();
+        for s in STEPPERS {
+            let v = d.number(s.key).unwrap_or_else(|| panic!("{} has no value", s.key));
+            assert!((s.min..=s.max).contains(&v), "{} default {v} outside {}..{}", s.key, s.min, s.max);
+        }
+    }
+
+    #[test]
+    fn metric_and_drive_toggles() {
+        let mut c = Config::default();
+        c.toggle_metric(Metric::Gpu);
+        assert!(!c.bar_metrics.contains(&Metric::Gpu));
+        c.toggle_metric(Metric::Gpu);
+        assert_eq!(c.metrics_text(), "cpu, memory, commit, storage, gpu, temperature, network");
+        c.toggle_metric(Metric::Refresh);
+        assert_eq!(c.bar_metrics.last(), Some(&Metric::Refresh));
+        c.toggle_drive("d:\\");
+        assert_eq!(c.drives_text(), "C:, D:");
+        c.toggle_drive("C:");
+        c.toggle_drive("D:");
+        assert_eq!(c.drives_text(), "D:", "the last drive stays");
+        let round_trip = parse(&format!("bar-metrics = {}\nstorage-drives = {}\n", c.metrics_text(), c.drives_text()));
+        assert_eq!(round_trip.config.bar_metrics, c.bar_metrics);
+        assert_eq!(round_trip.config.storage_drives, c.storage_drives);
+    }
+
+    #[test]
+    fn hotkeys_parse_and_turn_off() {
+        let c = parse("hotkey-dashboard = win+shift+d\nhotkey-pin =\nhotkey-line = h\nhotkey-nope = ctrl+x\n");
+        assert_eq!(c.warnings.len(), 2, "{:?}", c.warnings);
+        assert_eq!(c.config.hotkey_text(Command::Dashboard), "shift+win+d");
+        assert_eq!(c.config.hotkeys[Command::Pin.index()], None);
+        // A bad one keeps its default.
+        assert_eq!(c.config.hotkey_text(Command::Line), "ctrl+alt+h");
     }
 
     #[test]
