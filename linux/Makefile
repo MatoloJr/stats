@@ -50,6 +50,7 @@ logs:
 
 test: spec
 	gjs -m tests/parse.test.js
+	gjs -m tests/ui.test.js
 
 # Linux defaults against ../shared/defaults.ini (needs node, not gnome-shell).
 spec:

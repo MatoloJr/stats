@@ -34,6 +34,14 @@ const SYSTEM_MONITOR_IDS = [
     'gnome-system-monitor.desktop',
 ];
 
+/**
+ * @returns {Shell.App|null}
+ */
+function findSystemMonitor() {
+    const appSystem = Shell.AppSystem.get_default();
+    return SYSTEM_MONITOR_IDS.map(id => appSystem.lookup_app(id)).find(app => app) ?? null;
+}
+
 const LEVELS = ['stats-warning', 'stats-critical'];
 
 export const StatsIndicator = GObject.registerClass(
@@ -208,7 +216,8 @@ export const StatsIndicator = GObject.registerClass(
                 try {
                     const blur = new Shell.BlurEffect({mode: Shell.BlurMode.BACKGROUND, brightness: 0.6});
                     // GNOME 46+ calls it radius; older shells used sigma.
-                    if (GObject.Object.find_property.call(Shell.BlurEffect, 'radius'))
+                    // GObject properties show up as accessors on the instance.
+                    if ('radius' in blur)
                         blur.radius = 36;
                     else
                         blur.sigma = 18;
@@ -295,8 +304,9 @@ export const StatsIndicator = GObject.registerClass(
                         this._dashboard.setNotice(`${group.name} closed.`, 'normal');
                     } else {
                         this._forceNames.add(group.comm);
-                        this._dashboard.setNotice(
-                            `${group.name} is still running. Use Force end if it is stuck.`, 'warning');
+                        const text = `${group.name} is still running. Use Force end in Stats if it is stuck.`;
+                        this._dashboard.setNotice(text, 'warning');
+                        Main.notify('Stats', text);
                     }
                     this._dashboard.setPrograms(this._groups, this._forceNames);
                 }).catch(() => {});

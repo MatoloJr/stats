@@ -1,4 +1,5 @@
 import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -10,6 +11,8 @@ import {logInfo} from './lib/log.js';
 import {NetworkIndicator} from './lib/network_indicator.js';
 import {Poller} from './lib/poller.js';
 import {pressureCopy} from './lib/pressure.js';
+
+const DISPLAY_MODES = ['icon-text', 'text', 'compact'];
 
 const SYSTEM_MONITOR_IDS = [
     'org.gnome.SystemMonitor.desktop',
@@ -35,6 +38,7 @@ export default class StatsExtension extends Extension {
             this._settings.connect('changed::position-index', () => this._placeIndicator()),
         ];
         this._bindShield();
+        this._bindShortcuts();
         this._poller.start();
         this._syncPause();
         logInfo('enabled');
@@ -47,6 +51,7 @@ export default class StatsExtension extends Extension {
      * would fail to come back.
      */
     disable() {
+        this._unbindShortcuts();
         this._unbindShield();
         for (const id of this._placeIds)
             this._settings?.disconnect(id);
@@ -148,6 +153,41 @@ export default class StatsExtension extends Extension {
         }
         this._rightBoxId = 0;
         this._rightBox = null;
+    }
+
+    /**
+     * Global shortcuts (Settings › Shortcuts). The handlers look the
+     * indicator up when pressed, because it is rebuilt when its side changes.
+     */
+    _bindShortcuts() {
+        this._shortcuts = [];
+        const actions = {
+            'shortcut-dashboard': () => this._indicator?.menu.toggle(),
+            'shortcut-settings': () => this.openPreferences(),
+            'shortcut-display-mode': () => {
+                const current = DISPLAY_MODES.indexOf(this._settings.get_string('display-mode'));
+                this._settings.set_string('display-mode', DISPLAY_MODES[(current + 1) % DISPLAY_MODES.length]);
+            },
+        };
+        for (const [key, handler] of Object.entries(actions)) {
+            try {
+                Main.wm.addKeybinding(
+                    key,
+                    this._settings,
+                    Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+                    Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
+                    handler);
+                this._shortcuts.push(key);
+            } catch (error) {
+                logInfo(`shortcut ${key} is unavailable: ${error.message}`);
+            }
+        }
+    }
+
+    _unbindShortcuts() {
+        for (const key of this._shortcuts ?? [])
+            Main.wm.removeKeybinding(key);
+        this._shortcuts = [];
     }
 
     _notifyPressure(notice) {

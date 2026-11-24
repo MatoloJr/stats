@@ -1,4 +1,5 @@
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
@@ -36,6 +37,7 @@ export default class StatsPreferences extends ExtensionPreferences {
         window.add(this._metricsPage(settings));
         window.add(this._thresholdPage(settings));
         window.add(this._popupPage(settings));
+        window.add(this._shortcutsPage(settings, window));
         window.add(this._aboutPage(settings));
     }
 
@@ -363,13 +365,17 @@ export default class StatsPreferences extends ExtensionPreferences {
      */
     _popupPage(settings) {
         const page = new Adw.PreferencesPage({
-            title: 'Popup',
+            title: 'Dashboard',
             icon_name: 'utilities-system-monitor-symbolic',
         });
-        const group = new Adw.PreferencesGroup();
+        const group = new Adw.PreferencesGroup({
+            title: 'Dashboard',
+            description: 'Click the readings in the top bar, or press the dashboard shortcut, to open it.',
+        });
         page.add(group);
-        addSwitch(group, settings, 'show-sparklines', 'Sparklines', 'Draw history charts in the popup');
-        addSwitch(group, settings, 'show-per-core', 'Per-core bars', 'Show one bar for each CPU core');
+        addSwitch(group, settings, 'frosted-popup', 'Frosted glass', 'Blur what is behind the dashboard so it shows through');
+        addSwitch(group, settings, 'show-sparklines', 'Graphs', 'History graphs in the tiles and cards');
+        addSwitch(group, settings, 'show-per-core', 'Per-core bars', 'One bar for each CPU core');
         const choices = [30, 60, 120];
         const model = new Gtk.StringList();
         for (const seconds of choices)
@@ -393,6 +399,30 @@ export default class StatsPreferences extends ExtensionPreferences {
                 settings.set_int('history-seconds', seconds);
         });
         settings.connect('changed::history-seconds', apply);
+        return page;
+    }
+
+    /**
+     * @param {Gio.Settings} settings
+     * @param {Adw.PreferencesWindow} window
+     */
+    _shortcutsPage(settings, window) {
+        const page = new Adw.PreferencesPage({
+            title: 'Shortcuts',
+            icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic',
+        });
+        const group = new Adw.PreferencesGroup({
+            title: 'Keyboard shortcuts',
+            description: 'These work from any app. Choose Set and press the new combination.',
+        });
+        page.add(group);
+        for (const [key, title] of SHORTCUTS)
+            group.add(shortcutRow(settings, key, title, window));
+        const inside = new Adw.PreferencesGroup({
+            title: 'Inside the dashboard',
+            description: 'Arrow keys and Tab move between controls, Enter or Space presses one, and Esc closes the dashboard.',
+        });
+        page.add(inside);
         return page;
     }
 
@@ -424,6 +454,108 @@ export default class StatsPreferences extends ExtensionPreferences {
         group.add(reset);
         return page;
     }
+}
+
+const SHORTCUTS = [
+    ['shortcut-dashboard', 'Open or close the dashboard'],
+    ['shortcut-settings', 'Open these preferences'],
+    ['shortcut-display-mode', 'Cycle the top-bar style'],
+];
+
+/**
+ * @param {string[]} accels
+ * @returns {string}
+ */
+function shortcutLabel(accels) {
+    const accel = accels?.[0];
+    if (!accel)
+        return 'Off';
+    const [ok, key, mods] = Gtk.accelerator_parse(accel);
+    return ok && key ? Gtk.accelerator_get_label(key, mods) : accel;
+}
+
+/**
+ * A row showing one shortcut, with Set and Reset.
+ *
+ * @param {Gio.Settings} settings
+ * @param {string} key
+ * @param {string} title
+ * @param {Gtk.Window} window
+ * @returns {Adw.ActionRow}
+ */
+function shortcutRow(settings, key, title, window) {
+    const row = new Adw.ActionRow({title});
+    const shown = new Gtk.ShortcutLabel({
+        accelerator: settings.get_strv(key)[0] ?? '',
+        disabled_text: 'Off',
+        valign: Gtk.Align.CENTER,
+    });
+    row.add_suffix(shown);
+    const set = new Gtk.Button({label: 'Set…', valign: Gtk.Align.CENTER});
+    set.connect('clicked', () => recordShortcut(settings, key, title, window));
+    row.add_suffix(set);
+    const reset = iconButton('edit-undo-symbolic');
+    reset.tooltip_text = 'Back to the default';
+    reset.connect('clicked', () => settings.reset(key));
+    row.add_suffix(reset);
+    const sync = () => {
+        shown.accelerator = settings.get_strv(key)[0] ?? '';
+        row.subtitle = shortcutLabel(settings.get_strv(key));
+    };
+    sync();
+    settings.connect(`changed::${key}`, sync);
+    return row;
+}
+
+/**
+ * A small window that records the next key combination. Esc cancels and
+ * Backspace turns the shortcut off. A combination needs a modifier, so a
+ * plain key can never be taken from every app.
+ *
+ * @param {Gio.Settings} settings
+ * @param {string} key
+ * @param {string} title
+ * @param {Gtk.Window} parent
+ */
+function recordShortcut(settings, key, title, parent) {
+    const dialog = new Adw.Window({
+        transient_for: parent,
+        modal: true,
+        title: 'Set shortcut',
+        default_width: 420,
+        resizable: false,
+    });
+    const status = new Adw.StatusPage({
+        icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic',
+        title,
+        description: 'Press the new shortcut, for example Ctrl+Alt+S. Esc cancels; Backspace turns it off.',
+    });
+    const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
+    box.append(new Adw.HeaderBar({show_title: false}));
+    box.append(status);
+    dialog.set_content(box);
+    const keys = new Gtk.EventControllerKey();
+    keys.connect('key-pressed', (_controller, keyval, keycode, state) => {
+        const mods = state & Gtk.accelerator_get_default_mod_mask();
+        if (!mods && keyval === Gdk.KEY_Escape) {
+            dialog.close();
+            return Gdk.EVENT_STOP;
+        }
+        if (!mods && keyval === Gdk.KEY_BackSpace) {
+            settings.set_strv(key, []);
+            dialog.close();
+            return Gdk.EVENT_STOP;
+        }
+        if (!mods || !Gtk.accelerator_valid(keyval, mods)) {
+            status.description = 'Use a modifier too (Ctrl, Alt, Shift or Super) with a key.';
+            return Gdk.EVENT_STOP;
+        }
+        settings.set_strv(key, [Gtk.accelerator_name_with_keycode(null, keyval, keycode, mods)]);
+        dialog.close();
+        return Gdk.EVENT_STOP;
+    });
+    dialog.add_controller(keys);
+    dialog.present();
 }
 
 /**

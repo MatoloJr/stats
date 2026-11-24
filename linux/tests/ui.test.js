@@ -93,8 +93,5 @@ const empty = tileModels({}, get, 'celsius', null);
 check('n/a tiles do not throw', empty.length === 6 && empty[1].detail === 'n/a' && empty[4].detail === 'No sensor');
 check('sleeping gpu tile', tileModels(sleepingGpu, get, 'celsius')[3].value === 'idle');
 
-const done = `ok: ${passed} dashboard checks passed`;
-if (typeof print === 'function')
-    print(done); // gjs
-else
-    console.log(done);
+// console.log works in gjs (1.70+) and Node alike.
+console.log(`ok: ${passed} dashboard checks passed`);
