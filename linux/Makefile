@@ -2,7 +2,8 @@ UUID := $(shell python3 -c 'import json; print(json.load(open("metadata.json"))[
 SCHEMA := schemas/org.gnome.shell.extensions.stats.gschema.xml
 EXT_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 
-.PHONY: schemas install enable disable logs test pack lint
+.PHONY: schemas install enable disable logs test spec pack lint
+PACK_FILES := extension.js prefs.js metadata.json stylesheet.css lib schemas/org.gnome.shell.extensions.stats.gschema.xml
 
 schemas:
 	glib-compile-schemas --strict schemas/
@@ -47,11 +48,19 @@ disable:
 logs:
 	journalctl -f -o cat /usr/bin/gnome-shell
 
-test:
+test: spec
 	gjs -m tests/parse.test.js
 
-pack: schemas
-	gnome-extensions pack --force --extra-source=lib --extra-source=tests --schema=$(SCHEMA)
+# Linux defaults against ../shared/defaults.ini (needs node, not gnome-shell).
+spec:
+	node ../shared/check-spec.mjs
+
+# Release zip, built with python3 so CI needs no gnome-shell. The installer
+# compiles the schema on the user's machine.
+pack:
+	rm -f "$(UUID).shell-extension.zip"
+	python3 -m zipfile -c "$(UUID).shell-extension.zip" $(PACK_FILES)
+	@echo "Wrote $(UUID).shell-extension.zip"
 
 lint:
 	@test -x node_modules/.bin/eslint || npm install --ignore-scripts
