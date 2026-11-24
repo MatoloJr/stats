@@ -801,7 +801,7 @@ fn paint(app: &mut App, hwnd: HWND) {
     let fonts = &app.dash_fonts;
     let mut canvas = if app.dash_state.glass {
         // Window background mostly see-through, cards a little more solid.
-        Canvas::begin_glass(hwnd, &[(draw::BG, 150), (draw::PANEL, 205), (draw::PANEL_HOT, 220)])
+        Canvas::begin_glass(hwnd, &[(draw::BG, 185), (draw::PANEL, 218), (draw::PANEL_HOT, 230)])
     } else {
         Canvas::begin(hwnd)
     };

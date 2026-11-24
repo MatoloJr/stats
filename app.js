@@ -126,7 +126,11 @@ function moveIndicator(link) {
     indicator.style.transform = `translateX(${link.offsetLeft}px)`;
 }
 
-const sections = links.map(l => document.querySelector(l.getAttribute('href')));
+// In-page links only ("#id"); links to other pages have no section here.
+const sections = links.map(l => {
+    const href = l.getAttribute('href');
+    return href.startsWith('#') ? document.querySelector(href) : null;
+});
 const visible = new Map();
 const observer = new IntersectionObserver(entries => {
     for (const e of entries)

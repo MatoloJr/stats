@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Stats documentation: how it works with Windows and Linux</title>
+  <meta name="description" content="A deep dive into how Stats reads your system on Windows and Linux, what it changes, its settings, shortcuts, installers and privacy.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body class="docs">
+  <a class="skip" href="#overview">Skip to the documentation</a>
+
+  <nav class="nav" aria-label="Site">
+    <a href="index.html" class="nav__brand" aria-label="Stats home">
+      <img src="assets/favicon.svg" alt="" width="22" height="22">
+    </a>
+    <a href="index.html#download" class="nav__link">Download</a>
+    <a href="index.html#features" class="nav__link">Features</a>
+    <a href="docs.html" class="nav__link is-current" aria-current="page">Docs</a>
+    <a href="index.html#faq" class="nav__link">FAQ</a>
+    <span class="nav__indicator" aria-hidden="true"></span>
+  </nav>
+
+  <main>
+    <header class="hero hero--docs">
+      <p class="eyebrow">Documentation</p>
+      <h1>How Stats works</h1>
+      <p class="lede">Where every number comes from, what Stats changes on your computer (very little), every setting and shortcut, and what the installers do. Written for people who like to know what runs on their machine.</p>
+      <nav class="toc" aria-label="On this page">
+        <a href="#overview">Overview</a>
+        <a href="#windows">Windows</a>
+        <a href="#linux">Linux</a>
+        <a href="#settings">Settings</a>
+        <a href="#shortcuts">Shortcuts</a>
+        <a href="#installers">Installers</a>
+        <a href="#privacy">Privacy</a>
+        <a href="#troubleshooting">Troubleshooting</a>
+      </nav>
+    </header>
+
+    <section id="overview" class="section prose" aria-labelledby="overview-title">
+      <h2 id="overview-title">Overview</h2>
+      <p>Stats is two native programs that behave the same way:</p>
+      <ul>
+        <li><strong>Windows:</strong> one small <code>stats.exe</code> written in Rust against the Win32 API. No web view, no runtime, no service, no administrator rights.</li>
+        <li><strong>Linux:</strong> a GNOME Shell extension (JavaScript, GNOME 46 to 50). GNOME only runs extensions written in JavaScript, so it is its own program.</li>
+      </ul>
+      <p>They share <em>behaviour, not code</em>: the same setting names, the same warning levels idea and the same layout. One file in the source, <code>shared/defaults.ini</code>, lists every shared setting and its default, and the build fails if either app drifts from it. The decisions that need no operating system (when to warn, which program to blame, what counts as a build folder, how the readings fit, how the activity wave moves) live in a platform-neutral Rust library, <code>core/</code>, with unit tests. The macOS version will reuse it.</p>
+      <div class="callout">
+        <strong>The short version:</strong> Stats only <em>reads</em> counters the operating system already keeps. It changes something only when you click a button that says so (Close, Clean, Delete, Prune), and it asks first.
+      </div>
+    </section>
+
+    <section id="windows" class="section prose" aria-labelledby="windows-title">
+      <h2 id="windows-title">Windows, in depth</h2>
+
+      <h3>What you see</h3>
+      <ul>
+        <li><strong>The activity line.</strong> A hairline on the top edge (centred) or on the left or right side (vertical). At rest it lets every click through to whatever is underneath, so a browser's tabs keep working. Rest the pointer on it for about a third of a second, or press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>, and it wakes into a small "island" with voice-meter bars; click it for the readings.</li>
+        <li><strong>The readings.</strong> A frosted strip with every reading in one row. It fades away 4 seconds after the pointer leaves unless pinned.</li>
+        <li><strong>The dashboard.</strong> A frosted window in the middle of the screen with two tabs: <em>Overview</em> (live tiles, details, fixes) and <em>Settings</em>.</li>
+        <li><strong>The tray icon.</strong> Its bar fills with committed memory; click it for the dashboard, right-click for a short menu.</li>
+      </ul>
+
+      <h3>Where each number comes from</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Reading</th><th>Source</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>CPU</td><td><code>GetSystemTimes</code></td><td>Busy share between two samples (kernel + user − idle). The 1-second poll and the activity line each keep their own previous sample; the line samples 10 times a second, which is one cheap system call.</td></tr>
+            <tr><td>RAM</td><td><code>GlobalMemoryStatusEx</code></td><td>Physical memory in use.</td></tr>
+            <tr><td>Commit</td><td><code>GetPerformanceInfo</code></td><td>Memory promised to programs, against the <em>commit limit</em> (RAM + page file). Windows refuses memory, and apps crash, when this reaches 100%, even while RAM still looks partly free. This is the number Stats watches most closely.</td></tr>
+            <tr><td>Disk activity</td><td>PDH <code>\PhysicalDisk(_Total)\Disk Read Bytes/sec</code> and <code>…Write Bytes/sec</code></td><td rowspan="5">Performance counters are added with <code>PdhAddEnglishCounterW</code>, by their English names, so they work on a Windows set to any language.</td></tr>
+            <tr><td>Network</td><td>PDH <code>\Network Interface(*)\Bytes Received/sec</code>, <code>…Bytes Sent/sec</code></td></tr>
+            <tr><td>GPU busy</td><td>PDH <code>\GPU Engine(*)\Utilization Percentage</code></td></tr>
+            <tr><td>GPU memory</td><td>PDH <code>\GPU Adapter Memory(*)\Dedicated Usage</code></td></tr>
+            <tr><td>Temperature</td><td>PDH <code>\Thermal Zone Information(*)\Temperature</code></td></tr>
+            <tr><td>WSL / Docker VM</td><td>PDH <code>\Process(vmmem)\Working Set - Private</code></td><td>Also <code>VmmemWSL</code>.</td></tr>
+            <tr><td>Drive space</td><td><code>GetDiskFreeSpaceExW</code></td><td>For each drive in <code>storage-drives</code>.</td></tr>
+            <tr><td>Refresh rate</td><td><code>EnumDisplaySettingsW</code></td><td>The current display mode of each screen.</td></tr>
+            <tr><td>Page file</td><td>Registry, read only: <code>HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management</code>, value <code>PagingFiles</code></td><td>To tell "system managed" from a fixed size that is too small.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>GPU busy is the busiest engine (3D, copy, video), the same way Task Manager reports it. Many laptops do not expose a thermal zone to Windows; then Stats leaves temperature out instead of guessing.</p>
+
+      <h3>Who is using the memory</h3>
+      <p>Only while there is a warning or the dashboard is open, a background thread takes a ToolHelp snapshot (<code>CreateToolhelp32Snapshot</code>) and reads each process's <strong>private bytes</strong> (the memory that counts against the commit limit), then groups processes by program: "Chrome ×36 = 5 GB" rather than 36 rows. CPU per program needs two samples, taken 0.8 s apart.</p>
+      <p>When commit, RAM or CPU stays above its warning level for three polls in a row, Stats names the biggest program in a notification with one next step. Repeat warnings about the same thing wait at least <code>notify-quiet-minutes</code>; a jump from warning to critical is always reported.</p>
+
+      <h3>What happens when you click a fix</h3>
+      <ul>
+        <li><strong>Close</strong> posts <code>WM_CLOSE</code> to the program's windows, exactly like clicking its ✕, so it can ask you to save. Only if it is still running afterwards does Stats offer <strong>Force end</strong> (<code>TerminateProcess</code>).</li>
+        <li>Stats never offers to close parts of Windows: System, Registry, smss, csrss, wininit, winlogon, services, lsass, svchost, dwm, explorer, Defender and the like are on a fixed protected list.</li>
+        <li><strong>Shut down</strong> (WSL/Docker) runs <code>wsl --shutdown</code>. <strong>Prune</strong> runs <code>docker system prune -f</code>, which keeps volumes. <strong>Compact</strong> shrinks Docker's virtual disk and first checks Docker Desktop is closed.</li>
+        <li><strong>Clean</strong> (Temp) deletes files in your Temp folder, skipping files in use. <strong>Clean</strong> (caches) runs <code>npm cache clean</code>, <code>go clean -cache</code>, <code>pip cache purge</code> and <code>pnpm store prune</code> for the tools you have.</li>
+        <li>Nothing is closed or deleted without a Yes in a confirmation box first.</li>
+      </ul>
+
+      <h3>Build folders</h3>
+      <p>Stats scans the folders in <code>scan-roots</code> at background priority (<code>THREAD_MODE_BACKGROUND_BEGIN</code>, which also lowers disk priority). A folder only counts as build output when the file that proves it sits next to it:</p>
+      <ul class="cols-list">
+        <li><code>target</code> needs <code>Cargo.toml</code></li>
+        <li><code>node_modules</code>, <code>.next</code> need <code>package.json</code></li>
+        <li><code>build</code>, <code>.dart_tool</code> need <code>pubspec.yaml</code></li>
+        <li><code>.gradle</code> needs a Gradle build file</li>
+      </ul>
+      <p>A folder that just happens to be called <code>build</code> is never touched. The check is repeated right before deleting, deletion stays inside your scan folders, and links and junctions are never followed.</p>
+
+      <h3>How it draws, and what it costs</h3>
+      <ul>
+        <li>The activity line is a per-pixel-alpha layered window. Stats computes its anti-aliased shapes itself into a 32-bit bitmap and hands it to <code>UpdateLayeredWindow</code>. It redraws 20 times a second while the wave moves, 4 times a second when nothing moves, and not at all while hidden.</li>
+        <li>At rest the line has <code>WS_EX_TRANSPARENT</code>, so clicks pass through. A cheap <code>GetCursorPos</code> check each frame notices when the pointer rests on it and removes that style to wake it.</li>
+        <li>The readings and the dashboard use the system acrylic blur (the accent policy behind <code>SetWindowCompositionAttribute</code>, Windows 10 1803 and later). Background pixels are painted partly transparent so the blur shows; text stays solid. Without it they are drawn solid.</li>
+        <li>The line hides while a game or video is full screen (<code>SHQueryUserNotificationState</code>) and stops drawing while the screen is locked (<code>WTSRegisterSessionNotification</code>).</li>
+        <li>Measured on a 12-thread laptop: about 0.1% of the whole machine while the wave is moving, around 18 MB working set.</li>
+      </ul>
+
+      <h3>Files and registry entries</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>What</th><th>Where</th><th>Removed by uninstall</th></tr></thead>
+          <tbody>
+            <tr><td>The program</td><td><code>%LOCALAPPDATA%\Programs\Stats\</code></td><td>Yes</td></tr>
+            <tr><td>Settings and log</td><td><code>%APPDATA%\Stats\config.ini</code>, <code>stats.log</code> (capped at 512 KB)</td><td>Only with <code>-Purge</code></td></tr>
+            <tr><td>Start with Windows</td><td><code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code>, value <code>Stats</code></td><td>Yes</td></tr>
+            <tr><td>Settings › Apps entry</td><td><code>HKCU\…\CurrentVersion\Uninstall\Stats</code></td><td>Yes</td></tr>
+            <tr><td>Start Menu shortcut</td><td><code>%APPDATA%\Microsoft\Windows\Start Menu\Programs\Stats.lnk</code></td><td>Yes</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Everything is per user; nothing is written to <code>HKLM</code> or Program Files.</p>
+    </section>
+
+    <section id="linux" class="section prose" aria-labelledby="linux-title">
+      <h2 id="linux-title">Linux, in depth</h2>
+      <p>On GNOME the readings live in the top bar, with a dashboard under the indicator. Download and upload speeds sit next to the clock.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Reading</th><th>Source</th></tr></thead>
+          <tbody>
+            <tr><td>CPU</td><td><code>/proc/stat</code>: busy share between polls (<code>idle + iowait</code> against total). Frequency from <code>scaling_cur_freq</code> when cpufreq exists.</td></tr>
+            <tr><td>Memory</td><td><code>/proc/meminfo</code>: <code>MemTotal − MemAvailable</code>.</td></tr>
+            <tr><td>Storage</td><td>Space per mount point; speed from <code>/proc/diskstats</code> (512-byte sectors), skipping loop, ram and device-mapper devices and partitions whose disk is already counted.</td></tr>
+            <tr><td>GPU</td><td>Vendor from <code>/sys/class/drm/card*/device/vendor</code>. A card whose runtime PM status is <code>suspended</code> shows <em>idle/off</em> and is never queried, so a sleeping discrete GPU is not woken. NVIDIA: one long-lived <code>nvidia-smi -l 1</code>. AMD: sysfs. Intel: GT frequency from sysfs, engine use while <code>intel_gpu_top</code> runs.</td></tr>
+            <tr><td>Temperature</td><td>hwmon (Intel <code>coretemp</code>, AMD <code>k10temp</code> Tctl/Tdie, NVMe, amdgpu) and the <code>x86_pkg_temp</code> thermal zone.</td></tr>
+            <tr><td>Network</td><td><code>/proc/net/dev</code>, skipping loopback.</td></tr>
+            <tr><td>Refresh rate</td><td>Mutter <code>GetCurrentState</code> on D-Bus (<code>org.gnome.Mutter.DisplayConfig</code>), updated on <code>MonitorsChanged</code>. This is the nominal mode rate; variable-refresh panels do not report an instantaneous rate, so none is invented.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Settings are GSettings keys (schema <code>org.gnome.shell.extensions.stats</code>, stored in dconf). Polling pauses while the screen is locked or the session is idle, and folded dashboard sections are not refreshed at all. Optional tools that are not installed simply show <em>n/a</em>.</p>
+    </section>
+
+    <section id="settings" class="section prose" aria-labelledby="settings-title">
+      <h2 id="settings-title">Settings reference</h2>
+      <p>On Windows every setting below can be changed in <strong>Dashboard › Settings</strong>; changes apply at once. The same keys live in <code>%APPDATA%\Stats\config.ini</code>, which Stats reloads within two seconds of you saving it. On Linux use the extension's preferences.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Key</th><th>Windows default</th><th>Linux default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>poll-interval-ms</code></td><td>1000</td><td>1000</td><td>How often readings refresh (500–10000).</td></tr>
+            <tr><td><code>bar-position</code></td><td>top</td><td>(<code>position</code>: left)</td><td>Windows: <code>top</code>, <code>left</code> or <code>right</code> for the activity line. Linux: side of the top bar.</td></tr>
+            <tr><td><code>bar-pinned</code></td><td>false</td><td>—</td><td>Keep the readings open.</td></tr>
+            <tr><td><code>bar-visible</code></td><td>true</td><td>—</td><td>Show the activity line.</td></tr>
+            <tr><td><code>bar-metrics</code></td><td>cpu, memory, commit, storage, gpu, temperature, network</td><td>cpu, memory, storage, gpu, temperature, refresh</td><td>What the readings show, in order.</td></tr>
+            <tr><td><code>bar-show-speeds</code></td><td>true</td><td>—</td><td>Disk and network speeds next to the readings.</td></tr>
+            <tr><td><code>bar-opacity</code></td><td>250</td><td>—</td><td>How solid the frosted readings background is (80–255).</td></tr>
+            <tr><td><code>hide-when-fullscreen</code></td><td>true</td><td>—</td><td>Hide the line during full-screen games and video.</td></tr>
+            <tr><td><code>temperature-unit</code></td><td>celsius</td><td>celsius</td><td><code>celsius</code> or <code>fahrenheit</code>.</td></tr>
+            <tr><td><code>storage-drives</code></td><td>C:</td><td>(<code>mount-points</code>: /)</td><td>Drives to watch; the first is on the readings.</td></tr>
+            <tr><td><code>*-warning</code> / <code>*-critical</code></td><td>cpu 90/98 · memory 85/95 · commit 80/92 · storage 85/95 · gpu 90/98 · temp 85/95</td><td>70/90 (temp 75/90)</td><td>Levels for amber and red, in percent (temperature in °C).</td></tr>
+            <tr><td><code>pressure-notifications</code></td><td>true</td><td>false</td><td>Name the program behind high memory or CPU.</td></tr>
+            <tr><td><code>notify-quiet-minutes</code></td><td>10</td><td>—</td><td>Minimum time between alerts about the same thing.</td></tr>
+            <tr><td><code>pagefile-check</code></td><td>true</td><td>—</td><td>Warn when the page file is too small.</td></tr>
+            <tr><td><code>scan-roots</code></td><td>%USERPROFILE%\projects</td><td>—</td><td>Folders searched for build output, separated by <code>;</code>.</td></tr>
+            <tr><td><code>scan-interval-hours</code></td><td>24</td><td>—</td><td>Background rescan (0 = only when you click Scan).</td></tr>
+            <tr><td><code>junk-alert-gb</code></td><td>20</td><td>—</td><td>Notify when one build folder passes this size.</td></tr>
+            <tr><td><code>auto-clean-temp-days</code></td><td>0</td><td>—</td><td>Delete Temp files older than this, daily (0 = never).</td></tr>
+            <tr><td><code>history-seconds</code></td><td>120</td><td>60</td><td>How far back the graphs go.</td></tr>
+            <tr><td><code>collapsed-sections</code></td><td>(empty)</td><td>(empty)</td><td>Dashboard sections you folded; managed by Stats.</td></tr>
+            <tr><td><code>hotkey-*</code></td><td>see Shortcuts</td><td>—</td><td>Global keyboard shortcuts; empty turns one off.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>A value Stats cannot use falls back to its default and is noted in the log; a typo never stops Stats from starting.</p>
+    </section>
+
+    <section id="shortcuts" class="section prose" aria-labelledby="shortcuts-title">
+      <h2 id="shortcuts-title">Keyboard shortcuts (Windows)</h2>
+      <p>These work from any app. Change or turn them off in <strong>Settings › Keyboard shortcuts</strong> (press <em>Change</em>, then the new combination). If another app already owns a combination, Settings says so.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Shortcut</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd></td><td>Open or close the dashboard</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd></td><td>Show or hide the readings</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>,</kbd></td><td>Open settings</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd></td><td>Pin or unpin the readings</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd></td><td>Show or hide the activity line</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Inside the dashboard: <kbd>Esc</kbd> closes it; <kbd>1</kbd> and <kbd>2</kbd> (or <kbd>Ctrl</kbd>+<kbd>Tab</kbd>) switch between Overview and Settings; <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> move between controls and <kbd>Space</kbd> or <kbd>Enter</kbd> presses one; the arrow keys, <kbd>Page Up</kbd>, <kbd>Page Down</kbd>, <kbd>Home</kbd> and <kbd>End</kbd> scroll.</p>
+    </section>
+
+    <section id="installers" class="section prose" aria-labelledby="installers-title">
+      <h2 id="installers-title">What the installers do</h2>
+      <h3>Windows: <code>install.ps1</code></h3>
+      <ol>
+        <li>Checks for 64-bit Windows 10 or 11. No administrator rights are used.</li>
+        <li>Downloads <code>stats.exe</code>, <code>uninstall.ps1</code> and <code>SHA256SUMS</code> from the latest GitHub release (or the one in <code>STATS_VERSION</code>), retrying a dropped connection.</li>
+        <li>Verifies both files against <code>SHA256SUMS</code>. On a mismatch it stops and changes nothing.</li>
+        <li>Stops a running Stats (found by its window, so a copy started from Downloads is stopped too), copies the files to <code>%LOCALAPPDATA%\Programs\Stats</code>, adds the <code>Run</code> value, a Start Menu shortcut and the Settings › Apps entry, and starts Stats.</li>
+      </ol>
+      <h3>Linux: <code>install.sh</code></h3>
+      <ol>
+        <li>Refuses to run as root; checks GNOME Shell 46–50 and that <code>gnome-extensions</code>, <code>glib-compile-schemas</code>, <code>gsettings</code> and <code>curl</code> exist, naming the package to install if one is missing.</li>
+        <li>Downloads the extension zip and <code>SHA256SUMS</code> and verifies the zip.</li>
+        <li>Unpacks into a staging folder beside the extensions folder, compiles the schema, then swaps it into <code>~/.local/share/gnome-shell/extensions/stats@local</code> in one step, so a failed download never leaves half an install.</li>
+        <li>Enables the extension (recording it in <code>enabled-extensions</code> when the running Shell has not seen it yet).</li>
+      </ol>
+      <p>Running either installer again upgrades in place and keeps your settings. Uninstall with <code>… | bash -s -- --uninstall</code> or <code>irm …/uninstall.ps1 | iex</code> (or Settings › Apps on Windows).</p>
+    </section>
+
+    <section id="privacy" class="section prose" aria-labelledby="privacy-title">
+      <h2 id="privacy-title">Privacy and permissions</h2>
+      <ul>
+        <li><strong>No network use.</strong> Stats reads local counters only. The installers contact GitHub to download a release; the website asks GitHub for the latest version number. Nothing else.</li>
+        <li><strong>No telemetry, no accounts, no ads.</strong></li>
+        <li><strong>No administrator rights.</strong> Everything Stats reads is available to a normal user, and everything it writes is in your own profile.</li>
+        <li><strong>Your files are safe by default.</strong> The only deletions are the ones you confirm (build folders, Temp, caches, Docker), with the safety rules above.</li>
+      </ul>
+    </section>
+
+    <section id="troubleshooting" class="section prose" aria-labelledby="troubleshooting-title">
+      <h2 id="troubleshooting-title">Troubleshooting</h2>
+      <details>
+        <summary>The line covers part of my browser tabs.</summary>
+        <p>At rest it only draws on the outer few pixels and lets clicks through, so tabs under it still work. If you prefer it out of the way, choose <em>Left side</em> or <em>Right side</em> in Settings, or turn the line off and use <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>.</p>
+      </details>
+      <details>
+        <summary>A shortcut says "in use by another app".</summary>
+        <p>Another program registered that combination first. Press <em>Change</em> next to it in Settings and choose another, or turn it off with <em>Clear</em>.</p>
+      </details>
+      <details>
+        <summary>A new version will not start.</summary>
+        <p>Only one Stats runs at a time. If you started a <code>stats.exe</code> from another folder (say Downloads), quit it from its tray menu; running the installer again also stops it.</p>
+      </details>
+      <details>
+        <summary>The readings and dashboard are not frosted.</summary>
+        <p>The blur needs Windows 10 version 1803 or later with transparency effects on (Settings › Personalization › Colors). Without it they are drawn solid; everything else works the same.</p>
+      </details>
+      <details>
+        <summary>Linux: the indicator does not appear after installing.</summary>
+        <p>GNOME on Wayland loads new extensions only at login: log out and back in once. On X11 press <kbd>Alt</kbd>+<kbd>F2</kbd>, type <code>r</code> and press Enter.</p>
+      </details>
+      <details>
+        <summary>Where is the log?</summary>
+        <p>Windows: <code>%APPDATA%\Stats\stats.log</code> (Settings › System › Open log). It records warnings, settings problems and, if Stats ever crashes, where. Linux: <code>journalctl -f -o cat /usr/bin/gnome-shell</code>.</p>
+      </details>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Stats · MIT licence</span>
+    <a href="index.html">Home</a>
+    <a href="https://github.com/MatoloJr/stats">Source on GitHub</a>
+  </footer>
+</body>
+</html>

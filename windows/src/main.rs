@@ -17,8 +17,40 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use win::app::{self, MAIN_CLASS, WM_APP_SHOW_DASH};
 use win::util::{log, wide};
 
+/// Writes serious native faults to the log before Windows ends the process,
+/// so a crash report says where it happened. (First-chance handler: it only
+/// records, it never handles.)
+unsafe extern "system" fn log_fault(
+    info: *mut windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS,
+) -> i32 {
+    const CONTINUE_SEARCH: i32 = 0;
+    let Some(record) = info.as_ref().and_then(|i| i.ExceptionRecord.as_ref()) else { return CONTINUE_SEARCH };
+    let code = record.ExceptionCode as u32;
+    // Access violation, stack overflow, illegal instruction, fast-fail.
+    if matches!(code, 0xC000_0005 | 0xC000_00FD | 0xC000_001D | 0xC000_0409) {
+        let base = GetModuleHandleW(std::ptr::null()) as usize;
+        let at = record.ExceptionAddress as usize;
+        let detail = if code == 0xC000_0005 && record.NumberParameters >= 2 {
+            let kind = match record.ExceptionInformation[0] {
+                0 => "read",
+                1 => "write",
+                _ => "execute",
+            };
+            format!(" ({kind} of {:#x})", record.ExceptionInformation[1])
+        } else {
+            String::new()
+        };
+        log(&format!("fault {code:#x} at {at:#x} (stats.exe+{:#x}){detail}", at.wrapping_sub(base)));
+        if cfg!(debug_assertions) && code != 0xC000_00FD {
+            log(&format!("{}", std::backtrace::Backtrace::force_capture()));
+        }
+    }
+    CONTINUE_SEARCH
+}
+
 fn main() {
     std::panic::set_hook(Box::new(|info| log(&format!("panic: {info}"))));
+    unsafe { windows_sys::Win32::System::Diagnostics::Debug::AddVectoredExceptionHandler(1, Some(log_fault)) };
 
     // One copy only. Starting it again opens the running copy's dashboard.
     let mutex_name = wide("Local\\StatsForWindows.SingleInstance");

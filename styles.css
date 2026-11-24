@@ -230,3 +230,41 @@ details p { margin: 0 0 1.25rem; color: var(--ink-2); max-width: 70ch; }
   .nav__brand { display: none; }
   .nav__link { padding: 0 9px; font-size: .85rem; }
 }
+
+/* ---------- Documentation page ---------- */
+.hero--docs { padding-bottom: clamp(24px, 4vw, 40px); }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 1.5rem; }
+.toc a {
+  display: inline-flex; align-items: center; min-height: 40px; padding: 0 16px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--raised);
+  color: var(--ink); text-decoration: none; font-weight: 550; font-size: .92rem;
+  transition: border-color 160ms var(--ease), color 160ms var(--ease);
+}
+.toc a:hover { border-color: var(--accent); color: var(--accent); }
+.nav__link.is-current { color: var(--ink); background: var(--accent-soft); }
+
+.prose { max-width: 100%; }
+.prose > p, .prose > ul, .prose > ol { max-width: 72ch; }
+.prose h3 { margin: 2rem 0 .6rem; font-size: 1.15rem; }
+.prose ul, .prose ol { padding-left: 1.2rem; }
+.prose li { margin: .35rem 0; }
+.prose li::marker { color: var(--accent); }
+.cols-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 0 24px; }
+.callout {
+  margin: 1.5rem 0 0; padding: 16px 20px; max-width: 72ch;
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line));
+  border-radius: var(--radius); background: var(--accent-soft);
+}
+kbd {
+  font-family: var(--mono); font-size: .82em; padding: .1em .45em;
+  border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: var(--raised);
+}
+
+.table-wrap { overflow-x: auto; margin: 1rem 0 1.25rem; border: 1px solid var(--line); border-radius: var(--radius); }
+.table-wrap table { width: 100%; border-collapse: collapse; font-size: .94rem; }
+.table-wrap th, .table-wrap td { text-align: left; vertical-align: top; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.table-wrap th { font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); background: var(--raised); }
+.table-wrap tr:last-child td { border-bottom: 0; }
+.table-wrap td:first-child { white-space: nowrap; }
+@media (max-width: 640px) { .table-wrap td:first-child { white-space: normal; } }
+.docs details p { max-width: 72ch; }

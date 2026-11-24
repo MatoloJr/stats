@@ -269,6 +269,8 @@ pub fn parse(text: &str) -> Parsed {
     let mut warnings = Vec::new();
     // Thresholds are validated as pairs after reading, since warning must be
     // below critical.
+    // Notepad and PowerShell may save a UTF-8 byte-order mark first.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     for (number, raw) in text.lines().enumerate() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
@@ -710,6 +712,13 @@ mod tests {
         let round_trip = parse(&format!("bar-metrics = {}\nstorage-drives = {}\n", c.metrics_text(), c.drives_text()));
         assert_eq!(round_trip.config.bar_metrics, c.bar_metrics);
         assert_eq!(round_trip.config.storage_drives, c.storage_drives);
+    }
+
+    #[test]
+    fn byte_order_mark_is_ignored() {
+        let parsed = parse("\u{feff}# comment\npoll-interval-ms = 2000\n");
+        assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
+        assert_eq!(parsed.config.poll_interval_ms, 2000);
     }
 
     #[test]

@@ -26,20 +26,30 @@ CI builds and clippy-checks the app on every push and test-installs it. Pushing 
 
 ## What you see
 
-- **The activity line.** A small capsule at the top of the screen, centred by default. Its bars move with live activity, like a voice meter: CPU sampled ten times a second, plus disk and network bursts. A quiet machine gives a calm, almost flat line. The bars are teal normally and turn amber or red when commit, RAM or the first drive reach their warning or critical level.
-  - **Hover** for the headline numbers. **Click** to drop down the readings. **Right-click** for the menu.
-  - Choose **Left**, **Center** or **Right** from the dashboard or the menu (`bar-position`). The line sits below a taskbar that is at the top of the screen.
-  - It hides while a game or video runs full screen. It stops drawing while the screen is locked, and slows to 4 frames a second when nothing is moving.
-- **The readings strip.** It drops down under the line and shows `CPU 34% | RAM 68% | Commit 61% | C: 87% 3 MB/s | GPU 12% | ↓ 1.2 MB/s ↑ 40 KB/s`. Each value turns amber at the warning level and red at the critical level, and the top edge takes the colour of the worst one.
-  - It fades away 4 seconds after the pointer leaves, unless you **pin** it (`bar-pinned`).
-  - **Click** the readings, or ⌄, for the dashboard.
-  - On a narrow screen the speeds drop first, then the least important readings. Commit, RAM and CPU stay longest.
-- **The dashboard.** It opens in the middle of the screen over a dimmed backdrop.
-  - **Top row:** six live tiles (CPU, RAM, Commit, Disk, GPU, Network), each with a graph. Click a tile to jump to its details.
-  - **Cards:** Memory (with the programs using it, each with a **Close** button), CPU, GPU, temperature, storage, build folders, network and displays. Click a heading to fold that card; folded cards are remembered.
-  - **Quick controls:** line position, pin, start with Windows, hide in full screen, scan, settings, log and exit.
-  - Press **Esc**, click outside, or click ✕ to close it.
-- **The tray icon.** Its middle bar fills as committed memory rises and turns amber or red. The tooltip shows the headline numbers. Click it for the dashboard.
+- **The activity line.** A hairline on a screen edge: the top (centred, the default), or the left or right side, where it runs vertically. Its glow moves with live activity (CPU sampled ten times a second, plus disk and network bursts) and turns amber or red when commit, RAM or the first drive reach their levels.
+  - **It never gets in the way.** At rest it only covers the outer few pixels of the screen and lets every click through, so the browser tabs under it keep working.
+  - **Rest the pointer on it** for about a third of a second (or press `Ctrl+Alt+R`) and it wakes, growing into a small island with voice-meter bars. **Click** it for the readings; **right-click** for the menu. It sleeps again when the pointer leaves.
+  - It hides while a game or video runs full screen. It stops drawing while the screen is locked, and slows to 4 frames a second when nothing moves.
+- **The readings.** A frosted strip, under the line (or beside it on the sides), showing `CPU 34% | RAM 68% | Commit 61% | C: 87% 3 MB/s | GPU 12% | ↓ 1.2 MB/s ↑ 40 KB/s`. Values turn amber or red at their levels, and the top edge takes the worst colour.
+  - It fades 4 s after the pointer leaves, unless **pinned**: a filled pin shows that it stays.
+  - Click the readings (or ⌄) for the dashboard. Clicking the line while pinned also opens the dashboard rather than closing the readings.
+- **The dashboard.** A frosted window in the middle of the screen; the apps behind it stay visible, blurred. It has two tabs:
+  - **Overview:** six live tiles with graphs (click one to jump to it), then memory and the programs using it (each with **Close**), CPU, GPU, temperature, storage, build folders, network and displays. Click a heading to fold its card.
+  - **Settings:** every option as switches, − / + steppers, chips and buttons, including line position, pin, frost strength, readings shown, warning levels, refresh rate, alerts, drives, scan folders (with a folder picker), shortcuts, start with Windows, and restore defaults. Changes are saved to `config.ini` and apply at once.
+  - Esc, ✕ or a click outside closes it. `1`/`2` switch tabs; `Tab` moves a focus ring and `Space` presses.
+- **The tray icon.** Its middle bar fills as committed memory rises and turns amber or red. Click it for the dashboard.
+
+### Keyboard shortcuts
+
+They work from any app and can be changed or turned off in Settings (`hotkey-*` in `config.ini`).
+
+| Shortcut | Does |
+|---|---|
+| `Ctrl+Alt+S` | Open or close the dashboard |
+| `Ctrl+Alt+R` | Show or hide the readings |
+| `Ctrl+Alt+,` | Open settings |
+| `Ctrl+Alt+P` | Pin or unpin the readings |
+| `Ctrl+Alt+H` | Show or hide the activity line |
 
 ## How it keeps things from crashing
 
@@ -70,7 +80,7 @@ Stats protects itself too:
 
 ## Settings
 
-Settings live in `%APPDATA%\Stats\config.ini`. Choose **Settings…** in the menu to open the file in Notepad, edit it and save; Stats reloads it within about 2 seconds. Every setting is explained in the file itself. A bad value falls back to its default and is noted in `%APPDATA%\Stats\stats.log`. The default levels are:
+Settings live in `%APPDATA%\Stats\config.ini`. The easy way to change them is **Dashboard › Settings**. You can also edit the file (Settings › System › Edit config.ini) and save; Stats reloads it within about 2 seconds. Every setting is explained in the file itself. A bad value falls back to its default and is noted in `%APPDATA%\Stats\stats.log`. The default levels are:
 
 | | warning | critical |
 |---|---|---|
