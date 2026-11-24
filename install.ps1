@@ -38,8 +38,13 @@ function Install-Stats {
     if ([Environment]::OSVersion.Version.Major -lt 10) { throw 'Stats needs Windows 10 or 11.' }
     if (-not [Environment]::Is64BitOperatingSystem) { throw 'Stats needs 64-bit Windows.' }
     if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA is not set; run this as a normal signed-in user.' }
+    # Old .NET defaults can lack TLS 1.2, which GitHub requires. Leave
+    # SystemDefault alone: forcing a list there would also switch off TLS 1.3.
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $proto = [Net.ServicePointManager]::SecurityProtocol
+        if ($proto -ne [Net.SecurityProtocolType]::SystemDefault -and -not ($proto -band [Net.SecurityProtocolType]::Tls12)) {
+            [Net.ServicePointManager]::SecurityProtocol = $proto -bor [Net.SecurityProtocolType]::Tls12
+        }
     } catch { }
 
     # --- where to download from ----------------------------------------------
@@ -69,8 +74,18 @@ function Install-Stats {
             if ($local) {
                 Copy-Item -LiteralPath (Join-Path $base $name) $dest
             } else {
-                try { Invoke-WebRequest -UseBasicParsing -Uri "$base/$name" -OutFile $dest }
-                catch { throw "Could not download $base/$name. Check your connection, or that release '$Version' exists at https://github.com/$repo/releases. ($($_.Exception.Message))" }
+                # A dropped connection is usually transient, so retry; a 404 is not.
+                for ($try = 1; ; $try++) {
+                    try { Invoke-WebRequest -UseBasicParsing -Uri "$base/$name" -OutFile $dest; break }
+                    catch {
+                        $status = 0
+                        if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+                        if ($status -eq 404) { throw "Release '$Version' has no $name yet (404 at $base/$name). See https://github.com/$repo/releases." }
+                        if ($try -ge 3) { throw "Could not download $base/$name after 3 tries. Check your connection and run the command again. ($($_.Exception.Message))" }
+                        Write-Host "    retrying $name ($($_.Exception.Message))"
+                        Start-Sleep -Seconds (2 * $try)
+                    }
+                }
             }
         }
 
@@ -105,7 +120,10 @@ function Install-Stats {
         Set-Content -LiteralPath (Join-Path $installDir 'version.txt') -Value $Version -Encoding ASCII
 
         # Start with Windows: same value the tray menu toggle writes.
-        Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Stats' -Value "`"$exePath`""
+        # Fresh profiles (and CI runners) may not have the Run key yet.
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }
+        Set-ItemProperty $runKey -Name 'Stats' -Value "`"$exePath`""
 
         # Start Menu shortcut.
         $programs = [Environment]::GetFolderPath('Programs')

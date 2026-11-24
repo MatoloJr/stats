@@ -80,7 +80,13 @@ jobs:
           Copy-Item target\release\stats.exe, uninstall.ps1 $dist
           $sums = foreach ($n in 'stats.exe', 'uninstall.ps1') { "{0}  {1}" -f (Get-FileHash "$dist\$n").Hash.ToLower(), $n }
           [IO.File]::WriteAllText("$dist\SHA256SUMS", ($sums -join "`n") + "`n")
-          & .\install.ps1 -Source $dist -Version ci -NoStart
+          # Run as separate processes so a failure gives a real exit code.
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Source $dist -Version ci -NoStart
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed ($LASTEXITCODE)" }
           if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Stats\stats.exe")) { throw 'install did not place stats.exe' }
-          & "$env:LOCALAPPDATA\Programs\Stats\uninstall.ps1" -Purge
+          if (-not (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Stats -ErrorAction SilentlyContinue)) { throw 'autostart not set' }
+          if (-not (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Stats')) { throw 'Apps entry missing' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\Stats\uninstall.ps1" -Purge
+          if ($LASTEXITCODE -ne 0) { throw "uninstall.ps1 failed ($LASTEXITCODE)" }
           if (Test-Path "$env:LOCALAPPDATA\Programs\Stats") { throw 'uninstall left files behind' }
+          if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Stats') { throw 'Apps entry left behind' }
