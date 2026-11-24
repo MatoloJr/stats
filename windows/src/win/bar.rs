@@ -39,6 +39,12 @@ pub struct Piece {
 pub struct Layout {
     pub pieces: Vec<Piece>,
     pub detail_full: bool,
+    /// One reading per row (the line is on a screen side).
+    pub vertical: bool,
+    /// Vertical only: column widths and row height.
+    pub name_w: i32,
+    pub value_w: i32,
+    pub row_h: i32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -186,9 +192,93 @@ fn metrics(fonts: &Fonts) -> (i32, i32, i32, i32, i32) {
     (fonts.px(14), fonts.px(22), fonts.px(7), fonts.px(34), fonts.px(26))
 }
 
+/// Sizes for the vertical strip: (row height, footer height, top padding).
+fn vertical_metrics(fonts: &Fonts) -> (i32, i32, i32) {
+    (fonts.px(30), fonts.px(38), fonts.px(8))
+}
+
 /// Measure the readings, fit them, size the strip and place it under the
-/// line.
+/// line (top) or beside it (sides, one reading per row).
 pub fn relayout(app: &mut App) {
+    if app.config.bar_position.orientation() == place::Orientation::Vertical {
+        relayout_vertical(app);
+    } else {
+        relayout_horizontal(app);
+    }
+}
+
+fn relayout_vertical(app: &mut App) {
+    let fonts: &Fonts = &app.bar_fonts;
+    let (pad, _, inner, _, button) = metrics(fonts);
+    let (row_h, footer, top_pad) = vertical_metrics(fonts);
+    let all = pieces(app);
+    let dc = MeasureDc::new(fonts.mono);
+    let (mut name_w, mut value_w, mut speed_w) = (0, 0, 0);
+    for p in &all {
+        dc.select(fonts.mono);
+        name_w = name_w.max(dc.width(&p.name));
+        speed_w = speed_w.max(dc.width(&p.speed));
+        dc.select(fonts.mono_bold);
+        value_w = value_w.max(dc.width(&p.value));
+    }
+    drop(dc);
+    let work = line::work_area(app.line.hwnd);
+
+    // Too many rows for the screen: drop the least important first, the
+    // same order the horizontal strip uses.
+    let rows: Vec<Segment> =
+        all.iter().map(|p| Segment { full: row_h, compact: row_h, keep_priority: p.keep }).collect();
+    let available = (work.height() as f32 * 0.85) as i32 - top_pad - footer;
+    let (_, shown) = fit(&rows, 0, available);
+
+    let speeds = if speed_w > 0 { inner + speed_w } else { 0 };
+    let content = name_w + inner + value_w + speeds;
+    let width = (content + 2 * pad).max(2 * button + fonts.px(4) + 2 * pad);
+    let height = top_pad + shown.len() as i32 * row_h + footer;
+    app.bar_layout = Layout {
+        pieces: shown.iter().map(|&i| all[i].clone()).collect(),
+        detail_full: true,
+        vertical: true,
+        name_w,
+        value_w,
+        row_h,
+    };
+
+    // Footer buttons, right to left: open dashboard, then pin.
+    let mid = height - footer / 2;
+    let mut right = width - pad;
+    app.strip.buttons.clear();
+    for which in [Button::Open, Button::Pin] {
+        let r = RECT { left: right - button, top: mid - button / 2, right, bottom: mid + button / 2 };
+        app.strip.buttons.push((r, which));
+        right = r.left - fonts.px(4);
+    }
+    place_strip(app, width, height, work);
+}
+
+/// Move the strip window to its place beside or under the line.
+fn place_strip(app: &mut App, width: i32, height: i32, work: place::Rect) {
+    let gap = app.bar_fonts.px(4);
+    let r = place::strip_rect(app.line.rect, width, height, work, app.config.bar_position, gap);
+    let mut now: RECT = unsafe { zeroed() };
+    unsafe { GetWindowRect(app.bar, &mut now) };
+    if (now.left, now.top, now.right, now.bottom) != (r.left, r.top, r.right, r.bottom) {
+        unsafe {
+            SetWindowPos(
+                app.bar,
+                HWND_TOPMOST,
+                r.left,
+                r.top,
+                r.width(),
+                r.height(),
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+            )
+        };
+    }
+    unsafe { InvalidateRect(app.bar, null(), 0) };
+}
+
+fn relayout_horizontal(app: &mut App) {
     let fonts: &Fonts = &app.bar_fonts;
     let (pad, gap, inner, height, button) = metrics(fonts);
     let all = pieces(app);
@@ -211,7 +301,8 @@ pub fn relayout(app: &mut App) {
     let content: i32 = shown.iter().map(|&i| if full { segments[i].full } else { segments[i].compact }).sum::<i32>()
         + gap * (shown.len() as i32 - 1).max(0);
     let width = content + 2 * pad + buttons;
-    app.bar_layout = Layout { pieces: shown.iter().map(|&i| all[i].clone()).collect(), detail_full: full };
+    app.bar_layout =
+        Layout { pieces: shown.iter().map(|&i| all[i].clone()).collect(), detail_full: full, ..Default::default() };
 
     // Buttons, right to left: open dashboard, then pin.
     let mid = (fonts.px(2) + height) / 2;
@@ -222,24 +313,7 @@ pub fn relayout(app: &mut App) {
         app.strip.buttons.push((r, which));
         right = r.left - fonts.px(4);
     }
-
-    let r = place::strip_rect(app.line.rect, width, height, work, app.config.bar_position, fonts.px(4));
-    let mut now: RECT = unsafe { zeroed() };
-    unsafe { GetWindowRect(app.bar, &mut now) };
-    if (now.left, now.top, now.right, now.bottom) != (r.left, r.top, r.right, r.bottom) {
-        unsafe {
-            SetWindowPos(
-                app.bar,
-                HWND_TOPMOST,
-                r.left,
-                r.top,
-                r.width(),
-                r.height(),
-                SWP_NOACTIVATE | SWP_NOOWNERZORDER,
-            )
-        };
-    }
-    unsafe { InvalidateRect(app.bar, null(), 0) };
+    place_strip(app, width, height, work);
 }
 
 pub fn open(app: &mut App) {
@@ -328,11 +402,52 @@ fn paint(app: &mut App, hwnd: HWND) {
         if app.strip.glass { Canvas::begin_glass(hwnd, &[(draw::BG, tint(app))]) } else { Canvas::begin(hwnd) };
     let full = RECT { left: 0, top: 0, right: canvas.width, bottom: canvas.height };
     canvas.fill(full, draw::BG);
-    canvas.fill(
-        RECT { left: 0, top: 0, right: canvas.width, bottom: fonts.px(3) },
-        draw::signal_color(app.worst_level()),
-    );
+    let signal = draw::signal_color(app.worst_level());
 
+    if layout.vertical {
+        // The coloured edge faces the line.
+        let edge = fonts.px(3);
+        let strip_edge = match app.config.bar_position {
+            place::Anchor::Right => {
+                RECT { left: canvas.width - edge, top: 0, right: canvas.width, bottom: canvas.height }
+            }
+            _ => RECT { left: 0, top: 0, right: edge, bottom: canvas.height },
+        };
+        canvas.fill(strip_edge, signal);
+        let (_, footer, top_pad) = vertical_metrics(fonts);
+        let name_x = pad;
+        let value_x = pad + layout.name_w + inner;
+        let speed_x = value_x + layout.value_w + inner;
+        for (i, piece) in layout.pieces.iter().enumerate() {
+            let top = top_pad + i as i32 * layout.row_h;
+            let bottom = top + layout.row_h;
+            if i > 0 {
+                canvas.fill(RECT { left: pad, top, right: canvas.width - pad, bottom: top + 1 }, draw::LINE);
+            }
+            canvas.font(fonts.mono);
+            if !piece.name.is_empty() {
+                canvas.text(&piece.name, name_x, top, bottom, draw::TEXT);
+            }
+            canvas.font(fonts.mono_bold);
+            let color = match piece.level {
+                Some(Level::Normal) | None => draw::TEXT,
+                Some(level) => draw::level_color(level),
+            };
+            // A reading without a name (network) starts in the name column.
+            let x = if piece.name.is_empty() { name_x } else { value_x };
+            canvas.text(&piece.value, x, top, bottom, color);
+            if !piece.speed.is_empty() {
+                canvas.font(fonts.mono);
+                canvas.text(&piece.speed, speed_x, top, bottom, draw::MUTED);
+            }
+        }
+        let footer_top = canvas.height - footer;
+        canvas.fill(RECT { left: pad, top: footer_top, right: canvas.width - pad, bottom: footer_top + 1 }, draw::LINE);
+        paint_buttons(app, &mut canvas);
+        return;
+    }
+
+    canvas.fill(RECT { left: 0, top: 0, right: canvas.width, bottom: fonts.px(3) }, signal);
     let (top, bottom) = (fonts.px(2), canvas.height);
     let mut x = pad;
     for (i, piece) in layout.pieces.iter().enumerate() {
@@ -356,9 +471,13 @@ fn paint(app: &mut App, hwnd: HWND) {
         }
         x += gap;
     }
+    paint_buttons(app, &mut canvas);
+}
 
-    // Pin and open-dashboard buttons (laid out in `relayout`). A pinned strip
-    // shows a filled accent pin, so its state is obvious at a glance.
+/// Pin and open-dashboard buttons (laid out in `relayout`). A pinned strip
+/// shows a filled accent pin, so its state is obvious at a glance.
+fn paint_buttons(app: &App, canvas: &mut Canvas) {
+    let fonts = &app.bar_fonts;
     let pinned = app.config.bar_pinned;
     for &(r, which) in &app.strip.buttons {
         let hot = app.strip.hot == Some(which);

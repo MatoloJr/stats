@@ -30,7 +30,7 @@ CI builds and clippy-checks the app on every push and test-installs it. Pushing 
   - **It never gets in the way.** At rest it only covers the outer few pixels of the screen and lets every click through, so the browser tabs under it keep working.
   - **Rest the pointer on it** for about a third of a second (or press `Ctrl+Alt+R`) and it wakes, growing into a small island with voice-meter bars. **Click** it for the readings; **right-click** for the menu. It sleeps again when the pointer leaves.
   - It hides while a game or video runs full screen. It stops drawing while the screen is locked, and slows to 4 frames a second when nothing moves.
-- **The readings.** A frosted strip, under the line (or beside it on the sides), showing `CPU 34% | RAM 68% | Commit 61% | C: 87% 3 MB/s | GPU 12% | ↓ 1.2 MB/s ↑ 40 KB/s`. Values turn amber or red at their levels, and the top edge takes the worst colour.
+- **The readings.** A frosted panel. With the line at the top it is one row under it; on the left or right side it stands beside the line with one reading per row (name, value, speed in aligned columns), its coloured edge facing the line. It shows `CPU 34% | RAM 68% | Commit 61% | C: 87% 3 MB/s | GPU 12% | ↓ 1.2 MB/s ↑ 40 KB/s`. Values turn amber or red at their levels, and the top edge takes the worst colour.
   - It fades 4 s after the pointer leaves, unless **pinned**: a filled pin shows that it stays.
   - Click the readings (or ⌄) for the dashboard. Clicking the line while pinned also opens the dashboard rather than closing the readings.
 - **The dashboard.** A frosted window in the middle of the screen; the apps behind it stay visible, blurred. It has two tabs:
