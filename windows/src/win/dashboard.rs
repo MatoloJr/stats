@@ -32,7 +32,7 @@ const SCRIM_CLASS: &str = "StatsForWindowsScrim";
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const WIDTH: i32 = 720;
 /// Backdrop darkness, 0..255.
-const SCRIM_ALPHA: u8 = 92;
+const SCRIM_ALPHA: u8 = 125;
 
 #[derive(Default)]
 pub struct State {
@@ -656,6 +656,8 @@ pub fn show(app: &mut App) {
         app.dash_fonts = Fonts::new(dpi);
     }
     app.dash_state.autostart = util::autostart_enabled();
+    line::release(app);
+    bar::release(app);
     let fonts = &app.dash_fonts;
     let width = fonts.px(WIDTH);
     let content: i32 = heights(&rows(app), fonts, width).iter().sum::<i32>() + fonts.px(16);

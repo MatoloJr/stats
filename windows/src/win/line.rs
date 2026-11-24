@@ -40,7 +40,8 @@ const CAP_W: i32 = 132;
 const CAP_H: i32 = 12;
 const CAP_W_HOVER: i32 = 152;
 const CAP_H_HOVER: i32 = 18;
-const FAST_MS: u32 = 33;
+// 20 frames a second: smooth for bars this small, at two thirds the cost of 30.
+const FAST_MS: u32 = 50;
 const SLOW_MS: u32 = 250;
 const SAMPLE_MS: u64 = 100;
 
@@ -59,6 +60,7 @@ pub struct State {
     last_frame: u64,
     last_sample: u64,
     pub started: u64,
+    surface: Option<Surface>,
 }
 
 pub fn create(instance: HINSTANCE) -> Result<State, String> {
@@ -197,6 +199,12 @@ fn set_timer(app: &mut App, ms: u32) {
     }
 }
 
+/// Forget the hover (another window took over the pointer).
+pub fn release(app: &mut App) {
+    app.line.hover = false;
+    app.line.tracking = false;
+}
+
 /// Make sure frames run fast (something just started moving).
 pub fn wake(app: &mut App) {
     if app.line.visible {
@@ -247,18 +255,61 @@ fn frame(app: &mut App) {
     set_timer(app, if busy { FAST_MS } else { SLOW_MS });
 }
 
-/// Premultiplied BGRA pixels, written by hand so edges are anti-aliased.
-struct Pixels {
+/// The bitmap the line is drawn into, kept between frames (re-made only when
+/// the size changes) so a frame allocates nothing.
+pub struct Surface {
+    dc: HDC,
+    bitmap: HBITMAP,
+    old: HGDIOBJ,
+    bits: *mut u32,
     w: i32,
     h: i32,
-    data: Vec<u32>,
 }
 
-impl Pixels {
-    fn new(w: i32, h: i32) -> Self {
-        Pixels { w, h, data: vec![0; (w * h).max(1) as usize] }
+impl Surface {
+    fn new(w: i32, h: i32) -> Option<Surface> {
+        unsafe {
+            let dc = CreateCompatibleDC(null_mut());
+            let mut info: BITMAPINFO = zeroed();
+            info.bmiHeader = BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w,
+                biHeight: -h, // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                ..zeroed()
+            };
+            let mut bits: *mut core::ffi::c_void = null_mut();
+            let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+            if bitmap.is_null() || bits.is_null() {
+                DeleteDC(dc);
+                return None;
+            }
+            let old = SelectObject(dc, bitmap);
+            Some(Surface { dc, bitmap, old, bits: bits as *mut u32, w, h })
+        }
     }
+}
 
+impl Drop for Surface {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.dc, self.old);
+            DeleteObject(self.bitmap);
+            DeleteDC(self.dc);
+        }
+    }
+}
+
+/// Premultiplied BGRA pixels, written by hand so edges are anti-aliased.
+struct Pixels<'a> {
+    w: i32,
+    h: i32,
+    data: &'a mut [u32],
+}
+
+impl Pixels<'_> {
     /// Blend `color` at `alpha` (0..1) over pixel (x, y).
     fn blend(&mut self, x: i32, y: i32, color: COLORREF, alpha: f32) {
         if x < 0 || y < 0 || x >= self.w || y >= self.h || alpha <= 0.0 {
@@ -304,9 +355,19 @@ fn render(app: &mut App) {
     if !app.line.visible {
         return;
     }
-    let s = |v: i32| scale(app, v) as f32;
     let (w, h) = (app.line.rect.width(), app.line.rect.height());
-    let mut px = Pixels::new(w, h);
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    if app.line.surface.as_ref().is_none_or(|s| (s.w, s.h) != (w, h)) {
+        app.line.surface = Surface::new(w, h);
+    }
+    let Some(surface) = app.line.surface.as_ref() else { return };
+    // SAFETY: the DIB holds exactly w*h pixels and lives as long as `surface`.
+    let data = unsafe { std::slice::from_raw_parts_mut(surface.bits, (w * h) as usize) };
+    data.fill(0);
+    let mut px = Pixels { w, h, data };
+    let s = |v: i32| scale(app, v) as f32;
 
     // Capsule, growing a little on hover.
     let g = ease(app.line.grow);
@@ -340,38 +401,17 @@ fn render(app: &mut App) {
     }
 
     unsafe {
-        let screen = GetDC(null_mut());
-        let mem = CreateCompatibleDC(screen);
-        let mut info: BITMAPINFO = zeroed();
-        info.bmiHeader = BITMAPINFOHEADER {
-            biSize: size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: w,
-            biHeight: -h, // top-down
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB,
-            ..zeroed()
+        GdiFlush();
+        let pos = POINT { x: app.line.rect.left, y: app.line.rect.top };
+        let size = SIZE { cx: w, cy: h };
+        let src = POINT { x: 0, y: 0 };
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
         };
-        let mut bits: *mut core::ffi::c_void = null_mut();
-        let bitmap = CreateDIBSection(mem, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
-        if !bitmap.is_null() && !bits.is_null() {
-            std::ptr::copy_nonoverlapping(px.data.as_ptr(), bits as *mut u32, px.data.len());
-            let old = SelectObject(mem, bitmap);
-            let pos = POINT { x: app.line.rect.left, y: app.line.rect.top };
-            let size = SIZE { cx: w, cy: h };
-            let src = POINT { x: 0, y: 0 };
-            let blend = BLENDFUNCTION {
-                BlendOp: AC_SRC_OVER as u8,
-                BlendFlags: 0,
-                SourceConstantAlpha: 255,
-                AlphaFormat: AC_SRC_ALPHA as u8,
-            };
-            UpdateLayeredWindow(app.line.hwnd, screen, &pos, &size, mem, &src, 0, &blend, ULW_ALPHA);
-            SelectObject(mem, old);
-            DeleteObject(bitmap);
-        }
-        DeleteDC(mem);
-        ReleaseDC(null_mut(), screen);
+        UpdateLayeredWindow(app.line.hwnd, null_mut(), &pos, &size, surface.dc, &src, 0, &blend, ULW_ALPHA);
     }
 }
 

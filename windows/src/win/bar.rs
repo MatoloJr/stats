@@ -250,6 +250,17 @@ pub fn toggle(app: &mut App) {
     }
 }
 
+/// The dashboard opened on top: Windows may never send the strip its
+/// mouse-leave, so forget the hover and fold an unpinned strip away.
+pub fn release(app: &mut App) {
+    app.strip.hover = false;
+    app.strip.tracking = false;
+    app.strip.hot = None;
+    if !app.config.bar_pinned {
+        close(app);
+    }
+}
+
 /// The pointer did something: restart the linger countdown.
 pub fn touch(app: &mut App) {
     app.strip.idle_since = now_ms();

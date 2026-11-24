@@ -125,7 +125,7 @@ impl Default for Config {
             bar_visible: true,
             bar_position: Anchor::Center,
             bar_pinned: false,
-            bar_opacity: 235,
+            bar_opacity: 250,
             hide_when_fullscreen: true,
             temperature_unit: TempUnit::Celsius,
             storage_drives: vec!["C:".to_string()],
@@ -170,7 +170,7 @@ bar-metrics = cpu, memory, commit, storage, gpu, temperature, network
 # Show disk and network speeds next to the percentages.
 bar-show-speeds = true
 # Readings strip opacity: 80 (see-through) to 255 (solid).
-bar-opacity = 235
+bar-opacity = 250
 # Hide the bar while a game or video is running full screen.
 hide-when-fullscreen = true
 # celsius or fahrenheit
@@ -445,7 +445,7 @@ mod tests {
         let parsed =
             parse("poll-interval-ms = 5\nbar-opacity = lots\ncommit-warning = 95\ncommit-critical = 90\nnope\n");
         assert_eq!(parsed.config.poll_interval_ms, 1000);
-        assert_eq!(parsed.config.bar_opacity, 235);
+        assert_eq!(parsed.config.bar_opacity, 250);
         assert_eq!(parsed.config.commit, Config::default().commit);
         assert_eq!(parsed.warnings.len(), 4);
     }
