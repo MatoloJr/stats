@@ -412,7 +412,7 @@ export default class StatsPreferences extends ExtensionPreferences {
         }));
         group.add(new Adw.ActionRow({
             title: 'Project page',
-            subtitle: this.metadata.url || 'https://example.invalid/stats',
+            subtitle: this.metadata.url || 'https://github.com/MatoloJr/stats',
         }));
         const reset = new Adw.ButtonRow({
             title: 'Reset to defaults',

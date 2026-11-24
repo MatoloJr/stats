@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Stats: see your machine's limits before it hits them</title>
+  <meta name="description" content="Stats is a light system monitor for Linux (GNOME) and Windows. CPU, memory, storage, GPU, temperature and network in one slim bar, with warnings before things crash. One command to install.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#download">Skip to download</a>
+
+  <nav class="nav" aria-label="Sections">
+    <a href="#top" class="nav__brand" aria-label="Stats, back to top">
+      <img src="assets/favicon.svg" alt="" width="22" height="22">
+    </a>
+    <a href="#download" class="nav__link">Download</a>
+    <a href="#features" class="nav__link">Features</a>
+    <a href="#numbers" class="nav__link">Numbers</a>
+    <a href="#faq" class="nav__link">FAQ</a>
+    <span class="nav__indicator" aria-hidden="true"></span>
+  </nav>
+
+  <main id="top">
+    <header class="hero">
+      <p class="eyebrow">Linux &middot; Windows &middot; macOS soon</p>
+      <h1>See your machine's limits<br>before it hits them.</h1>
+      <p class="lede">Stats is a light system monitor that sits in one slim bar: CPU, memory, storage, GPU, temperature and network. When something runs high it tells you which program is to blame and what to do about it.</p>
+
+      <div class="mock" role="img" aria-label="Example Stats bar: CPU 34%, RAM 68%, Commit 83% (warning), C: 61%, GPU 12%, down 1.2 MB/s, up 40 KB/s">
+        <span class="mock__line" aria-hidden="true"></span>
+        <span>CPU <b>34%</b></span><i aria-hidden="true">|</i>
+        <span>RAM <b>68%</b></span><i aria-hidden="true">|</i>
+        <span class="is-warn">Commit <b>83%</b></span><i aria-hidden="true">|</i>
+        <span class="opt">C: <b>61%</b> 3 MB/s</span><i class="opt" aria-hidden="true">|</i>
+        <span class="opt">GPU <b>12%</b></span><i class="opt" aria-hidden="true">|</i>
+        <span>&darr; 1.2 MB/s &uarr; 40 KB/s</span>
+      </div>
+
+      <div class="hero__cta">
+        <a class="btn" href="#download" id="hero-download">Download</a>
+        <span class="release" id="release" aria-live="polite"></span>
+      </div>
+    </header>
+
+    <section id="download" class="section" aria-labelledby="download-title">
+      <h2 id="download-title">Install in one command</h2>
+      <p class="muted">Pick your system (we guessed it for you), copy the line, paste it in a terminal. That's it.</p>
+
+      <div class="tabs" role="tablist" aria-label="Operating system">
+        <button role="tab" id="tab-linux" aria-controls="panel-linux" aria-selected="true" data-os="linux">Linux</button>
+        <button role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false" tabindex="-1" data-os="windows">Windows</button>
+        <button role="tab" id="tab-macos" aria-controls="panel-macos" aria-selected="false" tabindex="-1" data-os="macos">macOS</button>
+      </div>
+
+      <div class="panel" role="tabpanel" id="panel-linux" aria-labelledby="tab-linux">
+        <ol class="steps">
+          <li>
+            <span>Open a terminal and run:</span>
+            <div class="cmd">
+              <code id="cmd-linux">curl -fsSL https://matolojr.github.io/stats/install.sh | bash</code>
+              <button class="copy" data-copy="cmd-linux" type="button">Copy</button>
+            </div>
+          </li>
+          <li><span>Log out and back in once. GNOME on Wayland only loads new extensions at login.</span></li>
+          <li><span>Stats appears in the top bar. Click it for the dashboard.</span></li>
+        </ol>
+        <dl class="facts">
+          <div><dt>Needs</dt><dd>GNOME Shell 46 to 50 (Ubuntu 24.04+, Fedora 40+, Arch, Debian 13). No root.</dd></div>
+          <div><dt>Safe</dt><dd>The script checks your system first and verifies the download's SHA-256 before changing anything.</dd></div>
+          <div><dt>Manual</dt><dd><a href="https://github.com/MatoloJr/stats/releases/latest/download/stats@local.shell-extension.zip">Extension zip</a> &middot; <a href="https://github.com/MatoloJr/stats/releases/latest/download/SHA256SUMS">SHA256SUMS</a> &middot; <a href="install.sh">read the script</a></dd></div>
+          <div><dt>Remove</dt><dd><code>curl -fsSL https://matolojr.github.io/stats/install.sh | bash -s -- --uninstall</code></dd></div>
+        </dl>
+      </div>
+
+      <div class="panel" role="tabpanel" id="panel-windows" aria-labelledby="tab-windows" hidden>
+        <ol class="steps">
+          <li>
+            <span>Open PowerShell (no admin needed) and run:</span>
+            <div class="cmd">
+              <code id="cmd-windows">irm https://matolojr.github.io/stats/install.ps1 | iex</code>
+              <button class="copy" data-copy="cmd-windows" type="button">Copy</button>
+            </div>
+          </li>
+          <li><span>Stats starts right away and with Windows from now on: a slim bar above the taskbar and a tray icon.</span></li>
+        </ol>
+        <dl class="facts">
+          <div><dt>Needs</dt><dd>Windows 10 or 11, 64-bit. Under 1 MB, a few MB of RAM, no runtime to install.</dd></div>
+          <div><dt>Safe</dt><dd>Installs for your user only, in <code>%LOCALAPPDATA%\Programs\Stats</code>, after checking SHA-256.</dd></div>
+          <div><dt>Manual</dt><dd><a href="https://github.com/MatoloJr/stats/releases/latest/download/stats.exe">stats.exe</a> &middot; <a href="https://github.com/MatoloJr/stats/releases/latest/download/SHA256SUMS">SHA256SUMS</a> &middot; <a href="install.ps1">read the script</a></dd></div>
+          <div><dt>Remove</dt><dd>Settings &rsaquo; Apps &rsaquo; Stats &rsaquo; Uninstall, or <code>irm https://matolojr.github.io/stats/uninstall.ps1 | iex</code></dd></div>
+        </dl>
+      </div>
+
+      <div class="panel" role="tabpanel" id="panel-macos" aria-labelledby="tab-macos" hidden>
+        <p class="soon">The macOS version is next. It will share the same warning rules and settings as Linux and Windows. <a href="https://github.com/MatoloJr/stats">Watch the repository</a> to hear when it lands.</p>
+      </div>
+    </section>
+
+    <section id="features" class="section" aria-labelledby="features-title">
+      <h2 id="features-title">What it does</h2>
+      <ul class="grid">
+        <li><h3>One slim bar</h3><p>CPU, memory, storage, GPU, temperature, network and refresh rate, each turning to a warning tint at your level. On narrow screens the least important readings step aside first.</p></li>
+        <li><h3>A dashboard on click</h3><p>History graphs, per-core load, every drive and sensor. Fold the sections you don't watch; folded sections stop refreshing, so they cost nothing.</p></li>
+        <li><h3>Names the culprit</h3><p>When memory or CPU stays high, Stats adds up every process of each program (Chrome &times;23 = 4.1 GB) and tells you which one to close.</p></li>
+        <li><h3>Stops crashes before they happen</h3><p>On Windows it watches committed memory against the real limit, checks your page file and offers one-click fixes for WSL, Docker and build folders.</p></li>
+        <li><h3>Light by design</h3><p>No web view, no background service, no telemetry. Sleeping GPUs are never woken up, and polling pauses while the screen is locked.</p></li>
+        <li><h3>Nothing without a yes</h3><p>Stats never closes a program or deletes a file without your click, and never touches parts of the operating system.</p></li>
+      </ul>
+    </section>
+
+    <section id="numbers" class="section" aria-labelledby="numbers-title">
+      <h2 id="numbers-title">Where the numbers come from</h2>
+      <p class="muted">No admin rights, no guessing: Stats shows what the operating system reports, and <em>n/a</em> when it doesn't.</p>
+      <div class="cols">
+        <div>
+          <h3>Linux</h3>
+          <ul class="plain">
+            <li><b>CPU</b> busy share of <code>/proc/stat</code> between polls</li>
+            <li><b>Memory</b> MemTotal minus MemAvailable</li>
+            <li><b>Storage</b> per mount point; speed from <code>/proc/diskstats</code></li>
+            <li><b>GPU</b> sysfs, <code>nvidia-smi</code> or <code>intel_gpu_top</code> when installed</li>
+            <li><b>Temperature</b> hwmon (coretemp, k10temp, NVMe, amdgpu)</li>
+            <li><b>Refresh</b> the nominal mode rate from Mutter</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Windows</h3>
+          <ul class="plain">
+            <li><b>CPU</b> <code>GetSystemTimes</code></li>
+            <li><b>RAM and commit</b> <code>GlobalMemoryStatusEx</code>, <code>GetPerformanceInfo</code></li>
+            <li><b>Disk, network, GPU</b> performance counters, by English name so any language works</li>
+            <li><b>GPU busy</b> the busiest engine, as Task Manager does</li>
+            <li><b>Temperature</b> the ACPI thermal zone, when the laptop exposes one</li>
+            <li><b>Per program</b> private bytes, the ones that count against the limit</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="section" aria-labelledby="faq-title">
+      <h2 id="faq-title">Questions</h2>
+      <details>
+        <summary>Why do I have to log out on Linux?</summary>
+        <p>GNOME Shell on Wayland only scans for new extensions when you log in. On X11, press Alt+F2, type <code>r</code> and Enter instead. Later updates need the same.</p>
+      </details>
+      <details>
+        <summary>Windows warns that the app is from an unknown publisher.</summary>
+        <p>The one-line installer doesn't trigger that warning. A <code>stats.exe</code> downloaded in a browser can, because it is not code-signed yet. Choose <em>More info &rsaquo; Run anyway</em>, or check it against <code>SHA256SUMS</code> first.</p>
+      </details>
+      <details>
+        <summary>Where are the settings?</summary>
+        <p>Linux: <code>gnome-extensions prefs stats@local</code>, or right-click the indicator. Windows: right-click the bar &rsaquo; Settings, which opens <code>%APPDATA%\Stats\config.ini</code>. It reloads within two seconds of saving.</p>
+      </details>
+      <details>
+        <summary>How do I update?</summary>
+        <p>Run the same install command again. It replaces the old version in place and keeps your settings.</p>
+      </details>
+      <details>
+        <summary>Does it send anything anywhere?</summary>
+        <p>No. Stats reads local counters only. The installers contact GitHub to download the release, and nothing else.</p>
+      </details>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Stats &middot; MIT licence</span>
+    <a href="https://github.com/MatoloJr/stats">Source on GitHub</a>
+    <a href="https://github.com/MatoloJr/stats/releases">All releases</a>
+  </footer>
+</body>
+</html>

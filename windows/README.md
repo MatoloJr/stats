@@ -2,20 +2,27 @@
 
 The Windows version of Stats. It is a single native `stats.exe` (Rust and Win32, with no web view and no runtime to install) that uses a few MB of RAM. It shows the same readings as the GNOME extension in a slim floating bar. It also watches for the problems that make a Windows dev laptop crash, and offers a one-click fix for each.
 
-The GNOME extension in the folder above is unchanged. The two share their settings names, their warning levels and their ideas, but no code, because a GNOME Shell extension cannot run on Windows.
+It lives beside the GNOME extension ([`../linux/`](../linux/README.md)). The two share their setting names, which [`shared/defaults.ini`](../shared/defaults.ini) records and CI checks. They cannot share code, because a GNOME Shell extension must be JavaScript. The platform-neutral logic is in the Rust crate [`core/`](../core/), which the macOS version will reuse.
 
 ## Install
 
-You need Rust with the MSVC toolchain (the same setup you use for Tauri).
+For users, from PowerShell (no admin):
 
 ```powershell
-cd windows
-.\build.ps1 -Install
+irm https://matolojr.github.io/stats/install.ps1 | iex
 ```
 
-This builds `stats.exe`, copies it to `%LOCALAPPDATA%\Programs\Stats`, sets it to start with Windows and starts it. After that, `cargo clean` in `windows\` frees the build folder.
+[`install.ps1`](install.ps1) downloads `stats.exe` from the latest GitHub release and checks it against `SHA256SUMS`. It installs to `%LOCALAPPDATA%\Programs\Stats`, sets Stats to start with Windows, adds a Start Menu shortcut and an entry in Settings > Apps, and starts it. Running it again upgrades in place. `$env:STATS_VERSION = '0.2.0'` before the command pins a release. To remove Stats, use Settings > Apps > Stats > Uninstall, or `irm https://matolojr.github.io/stats/uninstall.ps1 | iex`. Settings in `%APPDATA%\Stats` are kept unless you pass `-Purge` (or set `$env:STATS_PURGE = "1"` before the one-liner).
 
-The **Windows build** GitHub Action also builds `stats.exe` on every push that touches `windows/`, and attaches it to the run as the `stats-windows` artifact.
+From a checkout you need Rust with the MSVC toolchain (the same setup you use for Tauri):
+
+```powershell
+.\windows\build.ps1 -Install
+```
+
+This runs the core tests and builds `stats.exe`. It lays out the release files in `target\dist` and installs from there with `install.ps1`, so you test the same path users get. Afterwards, `cargo clean` at the repo root frees the build folder.
+
+CI builds and clippy-checks the app on every push and test-installs it. Pushing a `v*` tag publishes a release (see the [root README](../README.md#releasing)).
 
 ## What you see
 
@@ -83,10 +90,12 @@ None of these need administrator rights.
 ## Develop
 
 ```powershell
-cargo test --lib     # logic tests (also run on Linux)
-cargo clippy --all-targets
-cargo build --release
+cargo test -p stats-core          # logic tests (also run on Linux), including the shared-spec check
+cargo clippy --workspace --all-targets
+cargo build --release -p stats-win
 ```
 
-- `src/*.rs` (the `stats_core` library) holds every decision: settings parsing, when to warn, who is to blame, what counts as build output, Temp cleanup, page file rules and bar fitting. It makes no Win32 calls and has unit tests.
-- `src/win/` holds the Win32 side: sensors, the bar, the dashboard, the tray and the fixes.
+Run these from the repo root (it is a Cargo workspace).
+
+- [`../core/src/`](../core/src/) (the `stats_core` library) holds every decision: settings parsing, when to warn, who is to blame, what counts as build output, Temp cleanup, page file rules and bar fitting. It makes no Win32 calls and has unit tests.
+- `windows/src/win/` holds the Win32 side: sensors, the bar, the dashboard, the tray and the fixes.

@@ -8,18 +8,22 @@ Shell versions 46 through 50 are listed in `metadata.json`. The extension is an 
 
 ## Install
 
+For users (GNOME Shell 46 to 50, no root):
+
 ```bash
+curl -fsSL https://matolojr.github.io/stats/install.sh | bash
+```
+
+The script checks GNOME Shell and the tools it needs first, and prints the package to install when one is missing. It downloads the latest release zip and verifies it against `SHA256SUMS`. It unpacks into a staging folder that replaces the old version in one step, then enables the extension. `STATS_VERSION=0.2.0` pins a release. `... | bash -s -- --uninstall` removes Stats. On Wayland you still log out and back in once before the indicator appears.
+
+From this checkout (inside `linux/`):
+
+```bash
+./install.sh      # links this folder, compiles the schema, enables; same progress bar
+# or
 make install
 make enable
 ```
-
-From this checkout, `./install.sh` does the same install and prints a four-step progress bar. A hosted release can be installed with one command:
-
-```bash
-curl -fsSL https://example.invalid/stats/install.sh | bash
-```
-
-That host does not serve the script yet. The script refuses to run as root, leaves your other extensions enabled and still needs a logout on Wayland before the indicators appear.
 
 `make install` symlinks this directory to `~/.local/share/gnome-shell/extensions/stats@local/` and compiles the schema. Settings persist in dconf across logout.
 
@@ -70,10 +74,10 @@ The popup is capped at 480px wide and at 72% of the work area height and it scro
 ## Develop
 
 ```bash
-make test     # gjs parser tests
+make test     # shared-spec check (node) + gjs parser tests
 make lint     # ESLint 9 (npm install on first run; system ESLint 6 cannot load eslint.config.js)
 make schemas
-make pack     # stats@local.shell-extension.zip
+make pack     # stats@local.shell-extension.zip (the release asset; needs only python3)
 ```
 
 Parser tests cover `/proc/stat`, `/proc/meminfo`, `/proc/diskstats`, hwmon selection, nvidia-smi CSV, intel_gpu_top JSON and Mutter monitor state. They do not need a running shell.

@@ -1,0 +1,8 @@
+# Shell scripts must keep LF or bash fails on "\r"; Windows PowerShell 5.1
+# is happiest with CRLF. Everything else is normalised to LF in the repo.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.ico binary
+*.zip binary
+*.exe binary

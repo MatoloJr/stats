@@ -1,3 +1,6 @@
 node_modules/
-schemas/gschemas.compiled
+linux/schemas/gschemas.compiled
 *.shell-extension.zip
+
+# Rust build output (one workspace target for core/ and windows/)
+/target/
