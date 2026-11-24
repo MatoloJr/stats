@@ -55,7 +55,7 @@ impl Wave {
         self.seed ^= self.seed << 13;
         self.seed ^= self.seed >> 17;
         self.seed ^= self.seed << 5;
-        0.55 + 0.45 * (self.seed % 1000) as f32 / 999.0
+        0.3 + 0.7 * (self.seed % 1000) as f32 / 999.0
     }
 
     /// A new activity sample (0..1): scrolls everything one column left.
@@ -145,10 +145,10 @@ mod tests {
         assert_eq!(w.heights(), &[0.0; 4]);
         w.advance(1_000.0);
         let h = w.heights();
-        assert!(h[3] > 0.3 && h[..3].iter().all(|&v| v == 0.0), "{h:?}");
+        assert!(h[3] > 0.15 && h[..3].iter().all(|&v| v == 0.0), "{h:?}");
         w.push(1.0);
         w.advance(1_000.0);
-        assert!(w.heights()[2] > 0.3, "the first sample scrolled left");
+        assert!(w.heights()[2] > 0.15, "the first sample scrolled left");
         assert!(w.heights().iter().all(|&v| (0.0..=1.0).contains(&v)));
     }
 

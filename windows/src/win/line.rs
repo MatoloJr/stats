@@ -25,6 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use super::app::{guarded, now_ms, show_menu, with_app, App};
 use super::draw;
 use super::util::wide;
+use stats_core::config::Level;
 use stats_core::numbers::fmt_percent;
 use stats_core::place::{self, Rect};
 use stats_core::wave;
@@ -61,6 +62,10 @@ pub struct State {
     last_sample: u64,
     pub started: u64,
     surface: Option<Surface>,
+    /// The capsule without its bars, reused while size, hover and level stay
+    /// the same, so most frames only draw the 28 small bars.
+    base: Vec<u32>,
+    base_key: Option<(i32, i32, u32, Level)>,
 }
 
 pub fn create(instance: HINSTANCE) -> Result<State, String> {
@@ -365,9 +370,8 @@ fn render(app: &mut App) {
     let Some(surface) = app.line.surface.as_ref() else { return };
     // SAFETY: the DIB holds exactly w*h pixels and lives as long as `surface`.
     let data = unsafe { std::slice::from_raw_parts_mut(surface.bits, (w * h) as usize) };
-    data.fill(0);
-    let mut px = Pixels { w, h, data };
-    let s = |v: i32| scale(app, v) as f32;
+    let dpi = app.bar_fonts.dpi as i32;
+    let s = move |v: i32| (v * dpi / 96) as f32;
 
     // Capsule, growing a little on hover.
     let g = ease(app.line.grow);
@@ -377,8 +381,19 @@ fn render(app: &mut App) {
     let (x0, y0, x1, y1) = (cx - cap_w / 2.0, cy - cap_h / 2.0, cx + cap_w / 2.0, cy + cap_h / 2.0);
     let level = app.worst_level();
     let signal = draw::signal_color(level);
-    px.round_rect((x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0), cap_h / 2.0 + 1.0, draw::LINE, 0.55 + 0.3 * g);
-    px.round_rect((x0, y0, x1, y1), cap_h / 2.0, draw::BG, 0.86);
+    let key = (w, h, (app.line.grow * 64.0) as u32, level);
+    if app.line.base_key == Some(key) && app.line.base.len() == data.len() {
+        data.copy_from_slice(&app.line.base);
+    } else {
+        data.fill(0);
+        let mut px = Pixels { w, h, data: &mut *data };
+        px.round_rect((x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0), cap_h / 2.0 + 1.0, draw::LINE, 0.55 + 0.3 * g);
+        px.round_rect((x0, y0, x1, y1), cap_h / 2.0, draw::BG, 0.86);
+        app.line.base.clear();
+        app.line.base.extend_from_slice(data);
+        app.line.base_key = Some(key);
+    }
+    let mut px = Pixels { w, h, data };
 
     // Bars, mirrored around the middle like a voice meter.
     let heights = app.wave.heights();

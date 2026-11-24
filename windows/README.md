@@ -26,12 +26,20 @@ CI builds and clippy-checks the app on every push and test-installs it. Pushing 
 
 ## What you see
 
-- **The bar.** It sits just above the taskbar on the right and always stays on top. It shows `CPU 34% | RAM 68% | Commit 61% | C: 87% 3 MB/s | GPU 12% | ↓ 1.2 MB/s ↑ 40 KB/s`. Each value turns amber at the warning level and red at the critical level, and the thin line along the top takes the colour of the worst one.
-  - **Click** the bar for the dashboard. **Drag** it anywhere; its position is saved. **Right-click** for the menu.
+- **The activity line.** A small capsule at the top of the screen, centred by default. Its bars move with live activity, like a voice meter: CPU sampled ten times a second, plus disk and network bursts. A quiet machine gives a calm, almost flat line. The bars are teal normally and turn amber or red when commit, RAM or the first drive reach their warning or critical level.
+  - **Hover** for the headline numbers. **Click** to drop down the readings. **Right-click** for the menu.
+  - Choose **Left**, **Center** or **Right** from the dashboard or the menu (`bar-position`). The line sits below a taskbar that is at the top of the screen.
+  - It hides while a game or video runs full screen. It stops drawing while the screen is locked, and slows to 4 frames a second when nothing is moving.
+- **The readings strip.** It drops down under the line and shows `CPU 34% | RAM 68% | Commit 61% | C: 87% 3 MB/s | GPU 12% | ↓ 1.2 MB/s ↑ 40 KB/s`. Each value turns amber at the warning level and red at the critical level, and the top edge takes the colour of the worst one.
+  - It fades away 4 seconds after the pointer leaves, unless you **pin** it (`bar-pinned`).
+  - **Click** the readings, or ⌄, for the dashboard.
   - On a narrow screen the speeds drop first, then the least important readings. Commit, RAM and CPU stay longest.
-  - The bar hides while a game or video runs full screen.
+- **The dashboard.** It opens in the middle of the screen over a dimmed backdrop.
+  - **Top row:** six live tiles (CPU, RAM, Commit, Disk, GPU, Network), each with a graph. Click a tile to jump to its details.
+  - **Cards:** Memory (with the programs using it, each with a **Close** button), CPU, GPU, temperature, storage, build folders, network and displays. Click a heading to fold that card; folded cards are remembered.
+  - **Quick controls:** line position, pin, start with Windows, hide in full screen, scan, settings, log and exit.
+  - Press **Esc**, click outside, or click ✕ to close it.
 - **The tray icon.** Its middle bar fills as committed memory rises and turns amber or red. The tooltip shows the headline numbers. Click it for the dashboard.
-- **The dashboard.** Memory comes first, then CPU, GPU, temperature, storage, build folders, network and displays. Click a heading to fold that section; folded sections are remembered.
 
 ## How it keeps things from crashing
 
