@@ -1,0 +1,6 @@
+node_modules/
+schemas/gschemas.compiled
+*.shell-extension.zip
+
+# Windows build output
+/windows/target/

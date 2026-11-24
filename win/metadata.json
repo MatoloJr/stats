@@ -1,0 +1,9 @@
+{
+    "uuid": "stats@local",
+    "name": "Stats",
+    "description": "Real-time CPU, memory, storage, GPU, temperature, network speed and display refresh rate in the top bar.",
+    "shell-version": ["46", "47", "48", "49", "50"],
+    "settings-schema": "org.gnome.shell.extensions.stats",
+    "version": 1,
+    "url": "https://example.invalid/stats"
+}

@@ -1,0 +1,117 @@
+.stats-bar {
+    spacing: 0;
+}
+
+.stats-item {
+    spacing: 4px;
+}
+
+.stats-icon {
+    icon-size: 16px;
+}
+
+.stats-name,
+.stats-value,
+.stats-speed,
+.stats-sep {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}
+
+/* The single child of each panel button: ButtonBox allocates no other. */
+.stats-root {
+    spacing: 0;
+}
+
+.stats-startup {
+    spacing: 4px;
+    min-width: 8em;
+}
+
+.stats-network-startup {
+    spacing: 4px;
+    min-width: 5em;
+}
+
+.stats-network-row {
+    spacing: 4px;
+}
+
+.stats-warning {
+    color: #e5a50a;
+}
+
+.stats-critical {
+    color: #c01c28;
+}
+
+.stats-dashboard-item {
+    padding: 6px 8px;
+}
+
+.stats-dashboard {
+    spacing: 6px;
+    padding: 8px 4px;
+}
+
+.stats-popup-header {
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+/* The scroll view is capped from JS against the work area. */
+.stats-scroll {
+    min-height: 0;
+}
+
+.stats-section-header {
+    border-radius: 6px;
+    padding: 2px 4px;
+    margin-top: 4px;
+}
+
+.stats-section-header:hover,
+.stats-section-header:focus {
+    background-color: alpha(currentColor, 0.12);
+}
+
+.stats-section-heading {
+    spacing: 6px;
+}
+
+.stats-section-arrow {
+    icon-size: 12px;
+}
+
+.stats-section-title {
+    font-weight: bold;
+}
+
+.stats-section,
+.stats-stack,
+.stats-meter-row {
+    spacing: 4px;
+}
+
+.stats-detail {
+    font-variant-numeric: tabular-nums;
+}
+
+.stats-muted {
+    font-size: 0.85em;
+}
+
+.stats-meter-track {
+    height: 8px;
+    border-radius: 4px;
+    background-color: alpha(currentColor, 0.18);
+}
+
+.stats-meter-fill {
+    border-radius: 4px;
+    background-color: currentColor;
+}
+
+.stats-sparkline {
+    height: 36px;
+}
