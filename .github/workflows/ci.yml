@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  spec:
+    name: Shared spec and version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node shared/check-spec.mjs
+      - run: bash scripts/check-version.sh
+
+  linux:
+    name: Linux (GNOME extension)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y gjs libglib2.0-bin shellcheck
+      - run: make test
+      - run: make lint
+      - run: glib-compile-schemas --strict --dry-run schemas
+      - run: shellcheck install.sh ../scripts/check-version.sh
+      - run: make pack && python3 -m zipfile -l stats@local.shell-extension.zip
+
+  core:
+    name: Core (Rust, platform-neutral)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo test -p stats-core
+
+  windows:
+    name: Windows app
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo build --release -p stats-win
+      - name: PowerShell scripts parse
+        shell: pwsh
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem windows -Filter *.ps1) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors) | Out-Null
+            foreach ($e in $errors) { Write-Error "$($f.Name): $e"; $bad++ }
+            if ([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($f.FullName)) -match '[^\x00-\x7F]') {
+              Write-Error "$($f.Name) must stay ASCII (Windows PowerShell 5.1 reads it as ANSI)"; $bad++
+            }
+          }
+          exit $bad
+      - name: Install and uninstall from the built files
+        shell: powershell
+        run: |
+          $dist = "$env:RUNNER_TEMP\dist"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          Copy-Item target\release\stats.exe, windows\uninstall.ps1 $dist
+          $sums = foreach ($n in 'stats.exe', 'uninstall.ps1') { "{0}  {1}" -f (Get-FileHash "$dist\$n").Hash.ToLower(), $n }
+          [IO.File]::WriteAllText("$dist\SHA256SUMS", ($sums -join "`n") + "`n")
+          & .\windows\install.ps1 -Source $dist -Version ci -NoStart
+          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Stats\stats.exe")) { throw 'install did not place stats.exe' }
+          & "$env:LOCALAPPDATA\Programs\Stats\uninstall.ps1" -Purge
+          if (Test-Path "$env:LOCALAPPDATA\Programs\Stats") { throw 'uninstall left files behind' }

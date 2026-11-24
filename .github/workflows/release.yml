@@ -1,0 +1,60 @@
+# Push a tag like v0.2.0 (matching the VERSION file) to publish a release.
+# The installers on the website always fetch the latest non-prerelease.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-version.sh "$GITHUB_REF_NAME"
+      - run: node shared/check-spec.mjs
+      - run: make -C linux pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: linux/stats@local.shell-extension.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p stats-core
+      - run: cargo build --release -p stats-win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            target/release/stats.exe
+            windows/uninstall.ps1
+
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Flatten and checksum
+        run: |
+          mkdir release
+          find dist -type f \( -name 'stats.exe' -o -name 'uninstall.ps1' -o -name '*.shell-extension.zip' \) -exec cp {} release/ \;
+          cd release
+          sha256sum stats.exe uninstall.ps1 stats@local.shell-extension.zip > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--generate-notes --title "Stats $GITHUB_REF_NAME")
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
