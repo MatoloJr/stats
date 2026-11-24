@@ -420,7 +420,7 @@ export default class StatsPreferences extends ExtensionPreferences {
             group.add(shortcutRow(settings, key, title, window));
         const inside = new Adw.PreferencesGroup({
             title: 'Inside the dashboard',
-            description: 'Arrow keys and Tab move between controls, Enter or Space presses one, and Esc closes the dashboard.',
+            description: 'Tab moves between controls, Enter or Space presses one, and Esc closes the dashboard.',
         });
         page.add(inside);
         return page;

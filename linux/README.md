@@ -69,12 +69,31 @@ The top bar sits on the left by default, after the workspace indicator and befor
 
 ## The dashboard
 
-The popup is capped at 480px wide and at 72% of the work area height and it scrolls, so a tall dashboard cannot run off the bottom of the screen. Each heading is a button: clicking it folds the section and turns the arrow sideways. Folded sections are remembered in `collapsed-sections` and are not refreshed while they are closed, so folding the ones you do not watch also cuts the work done on every poll.
+Click the readings in the top bar (or press `Ctrl+Alt+S`) for the dashboard. It looks and works like the Windows app's:
+
+- **Header:** a status chip that names the most serious thing going on ("All good", "RAM high", "/ almost full", "CPU busy", "Running hot") and a gear that opens Preferences.
+- **Six live tiles:** CPU, RAM, Disk, GPU, Temperature and Network, each with a big value in its warning colour, a detail line and a small graph. Click a tile to jump to its card.
+- **Cards:** CPU (with per-core bars), Memory, Programs, Storage, Network, GPU, Temperatures and Displays, as label/value rows. Click a heading to fold a card. Folded cards are remembered in `collapsed-sections` and are not refreshed while folded, so folding the ones you do not watch also cuts the work done on every poll.
+- **Programs:** the programs using the most memory, grouped by name ("Firefox ×12 · 3.1 GB · 4%"). They are read from `/proc` only while the dashboard is open, and only your own processes are listed. **Close** asks first, then sends SIGTERM (the same request to quit as at log-out). If the program is still running 5 seconds later, the button becomes **Force end** (SIGKILL, also confirmed). Parts of the desktop (gnome-shell, gsd-*, Xwayland, PipeWire, systemd and so on) never get a button. **System Monitor** opens GNOME System Monitor.
+- **Quick controls:** top-bar side, top-bar style, graphs, per-core bars, pressure alerts, pause when locked and frosted glass, plus All settings… and System Monitor.
+
+The dashboard is **frosted**: the shell's own background blur shows what is behind it through a graphite tint. Turn it off in Preferences › Dashboard (`frosted-popup`). The popup is capped at 480px wide and at 72% of the work-area height, and it scrolls.
+
+### Keyboard shortcuts
+
+They work from anywhere in GNOME. Change them in Preferences › Shortcuts (Set…, then press the combination; Backspace turns one off).
+
+| Shortcut | Does | Setting |
+|---|---|---|
+| `Ctrl+Alt+S` | Open or close the dashboard | `shortcut-dashboard` |
+| `Ctrl+Alt+,` | Open Preferences | `shortcut-settings` |
+| `Ctrl+Alt+H` | Cycle the top-bar style: icons, text, compact | `shortcut-display-mode` |
 
 ## Develop
 
 ```bash
-make test     # shared-spec check (node) + gjs parser tests
+make test     # shared-spec check (node) + gjs parser and dashboard tests
+node tests/ui.test.js   # the dashboard logic tests also run under Node
 make lint     # ESLint 9 (npm install on first run; system ESLint 6 cannot load eslint.config.js)
 make schemas
 make pack     # stats@local.shell-extension.zip (the release asset; needs only python3)

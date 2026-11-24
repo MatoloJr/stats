@@ -137,7 +137,11 @@
 
     <section id="linux" class="section prose" aria-labelledby="linux-title">
       <h2 id="linux-title">Linux, in depth</h2>
-      <p>On GNOME the readings live in the top bar, with a dashboard under the indicator. Download and upload speeds sit next to the clock.</p>
+      <h3>What you see</h3>
+      <p>The readings live in the top bar, left or right of the clock, with download and upload speeds next to it. Click them (or press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd>) for the dashboard. It is laid out like the Windows one: a status chip, six live tiles with graphs, folding cards, the programs using memory, and quick controls. It is frosted with the shell's own background blur (<code>Shell.BlurEffect</code>), so the windows behind it show through.</p>
+      <h3>Programs, Close and Force end</h3>
+      <p>Only while the dashboard is open, Stats reads <code>/proc/&lt;pid&gt;/stat</code> and <code>/proc/&lt;pid&gt;/status</code> every 3 seconds, in small asynchronous batches, keeps <strong>your own processes</strong> (matching <code>Uid</code>) and groups them by name. <strong>Close</strong> shows a GNOME confirmation, then runs <code>kill -TERM</code> on every process of that program: the same request to quit a program gets when you log out, so save your work first. If any is still running 5 seconds later, a notification says so and the button becomes <strong>Force end</strong>, which after a second confirmation runs <code>kill -KILL</code>. The shell itself and parts of the desktop (gsd-*, Xwayland, PipeWire, systemd, D-Bus and the like) never get a button.</p>
+      <h3>Where the numbers come from</h3>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Reading</th><th>Source</th></tr></thead>
@@ -182,7 +186,8 @@
             <tr><td><code>auto-clean-temp-days</code></td><td>0</td><td>—</td><td>Delete Temp files older than this, daily (0 = never).</td></tr>
             <tr><td><code>history-seconds</code></td><td>120</td><td>60</td><td>How far back the graphs go.</td></tr>
             <tr><td><code>collapsed-sections</code></td><td>(empty)</td><td>(empty)</td><td>Dashboard sections you folded; managed by Stats.</td></tr>
-            <tr><td><code>hotkey-*</code></td><td>see Shortcuts</td><td>—</td><td>Global keyboard shortcuts; empty turns one off.</td></tr>
+            <tr><td><code>hotkey-*</code> / <code>shortcut-*</code></td><td>see Shortcuts</td><td>see Shortcuts</td><td>Global keyboard shortcuts; empty turns one off.</td></tr>
+            <tr><td><code>frosted-popup</code></td><td>(always on when available)</td><td>true</td><td>Linux: blur behind the dashboard.</td></tr>
           </tbody>
         </table>
       </div>
@@ -190,7 +195,8 @@
     </section>
 
     <section id="shortcuts" class="section prose" aria-labelledby="shortcuts-title">
-      <h2 id="shortcuts-title">Keyboard shortcuts (Windows)</h2>
+      <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+      <h3>Windows</h3>
       <p>These work from any app. Change or turn them off in <strong>Settings › Keyboard shortcuts</strong> (press <em>Change</em>, then the new combination). If another app already owns a combination, Settings says so.</p>
       <div class="table-wrap">
         <table>
@@ -204,7 +210,19 @@
           </tbody>
         </table>
       </div>
-      <p>Inside the dashboard: <kbd>Esc</kbd> closes it; <kbd>1</kbd> and <kbd>2</kbd> (or <kbd>Ctrl</kbd>+<kbd>Tab</kbd>) switch between Overview and Settings; <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> move between controls and <kbd>Space</kbd> or <kbd>Enter</kbd> presses one; the arrow keys, <kbd>Page Up</kbd>, <kbd>Page Down</kbd>, <kbd>Home</kbd> and <kbd>End</kbd> scroll.</p>
+      <h3>Linux (GNOME)</h3>
+      <p>Registered with the window manager (<code>Main.wm.addKeybinding</code>), so they work from any app. Change them in Preferences › Shortcuts.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Shortcut</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd></td><td>Open or close the dashboard</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>,</kbd></td><td>Open Preferences</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd></td><td>Cycle the top-bar style (icons, text, compact)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Inside the Windows dashboard: <kbd>Esc</kbd> closes it; <kbd>1</kbd> and <kbd>2</kbd> (or <kbd>Ctrl</kbd>+<kbd>Tab</kbd>) switch between Overview and Settings; <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> move between controls and <kbd>Space</kbd> or <kbd>Enter</kbd> presses one; the arrow keys, <kbd>Page Up</kbd>, <kbd>Page Down</kbd>, <kbd>Home</kbd> and <kbd>End</kbd> scroll.</p>
     </section>
 
     <section id="installers" class="section prose" aria-labelledby="installers-title">
