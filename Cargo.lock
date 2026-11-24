@@ -3,9 +3,14 @@
 version = 4
 
 [[package]]
+name = "stats-core"
+version = "0.1.0"
+
+[[package]]
 name = "stats-win"
 version = "0.1.0"
 dependencies = [
+ "stats-core",
  "windows-sys",
 ]
 

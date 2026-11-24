@@ -484,3 +484,55 @@ mod tests {
         assert_eq!(limits.level(None), Level::Normal);
     }
 }
+
+/// Checks `Config::default()` against the cross-platform spec in
+/// `shared/defaults.ini` ([shared] plus [windows]).
+#[cfg(test)]
+mod spec {
+    use super::*;
+
+    const SPEC: &str = include_str!("../../shared/defaults.ini");
+
+    /// The `key = value` lines of `[shared]` and `[windows]`.
+    fn windows_lines() -> Vec<(String, String)> {
+        let mut section = String::new();
+        let mut out = Vec::new();
+        for raw in SPEC.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                section = name.to_string();
+                continue;
+            }
+            if section == "shared" || section == "windows" {
+                let (key, value) = line.split_once('=').expect("spec line is key = value");
+                out.push((key.trim().to_string(), value.trim().to_string()));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn defaults_match_shared_spec() {
+        let lines = windows_lines();
+        assert!(lines.len() > 10, "spec looks empty");
+        // Every spec key must be a real setting here and hold the default.
+        let text: String = lines.iter().map(|(k, v)| format!("{k} = {v}\n")).collect();
+        let parsed = parse(&text);
+        assert!(parsed.warnings.is_empty(), "spec keys rejected: {:?}", parsed.warnings);
+        assert_eq!(parsed.config, Config::default(), "shared/defaults.ini and Config::default() disagree");
+        // Parsing starts from the default, so also check each value changes
+        // the result when altered: a spec value equal to the default by
+        // accident of the fallback would otherwise pass.
+        for (key, value) in &lines {
+            assert!(
+                DEFAULT_TEXT
+                    .lines()
+                    .any(|l| l.split_once('=').is_some_and(|(k, v)| k.trim() == key && v.trim() == value.as_str())),
+                "DEFAULT_TEXT does not say {key} = {value}"
+            );
+        }
+    }
+}
