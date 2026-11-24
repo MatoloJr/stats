@@ -136,5 +136,23 @@
       <summary>Warn when one program is using much more than usual</summary>
       <description>After CPU or memory stays at the warning threshold, name the busiest program and suggest quitting it. Off until you turn it on.</description>
     </key>
+    <key name="frosted-popup" type="b">
+      <default>true</default>
+      <summary>Frosted dashboard</summary>
+      <description>Blur what is behind the dashboard so it shows through, as frosted glass.</description>
+    </key>
+    <key name="shortcut-dashboard" type="as">
+      <default><![CDATA[['<Control><Alt>s']]]></default>
+      <summary>Shortcut: open or close the dashboard</summary>
+    </key>
+    <key name="shortcut-settings" type="as">
+      <default><![CDATA[['<Control><Alt>comma']]]></default>
+      <summary>Shortcut: open preferences</summary>
+    </key>
+    <key name="shortcut-display-mode" type="as">
+      <default><![CDATA[['<Control><Alt>h']]]></default>
+      <summary>Shortcut: cycle the top-bar display mode</summary>
+      <description>Icon and text, then text only, then compact.</description>
+    </key>
   </schema>
 </schemalist>

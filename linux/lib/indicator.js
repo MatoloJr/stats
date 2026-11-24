@@ -4,12 +4,18 @@ import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
+import GLib from 'gi://GLib';
+
+import * as Dialog from 'resource:///org/gnome/shell/ui/dialog.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {METRICS} from './constants.js';
+import {logInfo} from './log.js';
 import {naturalWidth, sideBudget} from './panel_fit.js';
+import {ProcessSampler, signalProcesses, stillRunning} from './processes.js';
 import {Dashboard} from './widgets/dashboard.js';
 import {Meter} from './widgets/meter.js';
 import {
@@ -65,7 +71,33 @@ export const StatsIndicator = GObject.registerClass(
             this._fitting = false;
             this._snapshot = null;
 
-            this._dashboard = new Dashboard(settings);
+            this._systemMonitor = findSystemMonitor();
+            this._forceNames = new Set();
+            this._groups = [];
+            this._closeTimers = new Set();
+            this._dashboard = new Dashboard(settings, {
+                openPreferences: () => {
+                    this.menu.close();
+                    this._openPreferences?.();
+                },
+                openSystemMonitor: this._systemMonitor
+                    ? () => {
+                        this.menu.close();
+                        this._systemMonitor.activate();
+                    }
+                    : null,
+                closeProgram: (group, force) => this._confirmClose(group, force),
+                scrollTo: actor => this._scrollTo(actor),
+            });
+            this._sampler = new ProcessSampler(groups => {
+                this._groups = groups;
+                // Forget "still running" once a program has really gone.
+                for (const name of [...this._forceNames]) {
+                    if (!groups.some(group => group.comm === name))
+                        this._forceNames.delete(name);
+                }
+                this._dashboard.setPrograms(groups, this._forceNames);
+            });
             // A BoxPointer is as tall as its content, so a dashboard taller
             // than the screen simply runs off it. Scrolling gives the menu a
             // small minimum height, which is what lets the max-height that
@@ -86,13 +118,24 @@ export const StatsIndicator = GObject.registerClass(
             });
             item.add_child(this._scroll);
             this.menu.addMenuItem(item);
-            this.menu.addAction('Preferences', () => this._openPreferences?.());
-            this._systemItem = null;
+            this.menu.box?.add_style_class_name('stats-menu');
+            this._blur = null;
+            this._syncFrost();
 
-            this._settingId = settings.connect('changed', () => this._render());
+            this._settingId = settings.connect('changed', (_settings, key) => {
+                if (key === 'frosted-popup')
+                    this._syncFrost();
+                this._render();
+            });
             this._hoverId = this.connect('notify::hover', () => this._renderBar());
-            this._menuId = this.menu.connect('open-state-changed', () => {
-                this._syncSystemMonitor();
+            this._menuId = this.menu.connect('open-state-changed', (_menu, open) => {
+                // Programs are read only while the dashboard is open.
+                if (open) {
+                    this._sampler.start(this._snapshot?.cpu?.cores?.length ?? 1);
+                } else {
+                    this._sampler.stop();
+                    this._dashboard.setNotice(null);
+                }
                 this._capPopup();
                 this._renderBar();
             });
@@ -108,10 +151,18 @@ export const StatsIndicator = GObject.registerClass(
             });
             this.connect('destroy', () => this._onDestroy());
             this._capPopup();
-            this._syncSystemMonitor();
         }
 
         _onDestroy() {
+            this._sampler?.destroy();
+            this._sampler = null;
+            for (const id of this._closeTimers)
+                GLib.source_remove(id);
+            this._closeTimers.clear();
+            if (this._blur) {
+                this.menu.box?.remove_effect(this._blur);
+                this._blur = null;
+            }
             if (this._hoverId) {
                 this.disconnect(this._hoverId);
                 this._hoverId = 0;
@@ -144,18 +195,114 @@ export const StatsIndicator = GObject.registerClass(
             this._barIds = [];
         }
 
-        _syncSystemMonitor() {
-            if (this._systemItem)
+        /**
+         * Frosted glass: the shell's own background blur behind the menu,
+         * with a translucent tint from the stylesheet on top.
+         */
+        _syncFrost() {
+            const box = this.menu.box;
+            if (!box)
                 return;
-            const appSystem = Shell.AppSystem.get_default();
-            const app = SYSTEM_MONITOR_IDS
-                .map(id => appSystem.lookup_app(id))
-                .find(found => found);
-            if (!app)
+            const want = this._settings?.get_boolean('frosted-popup') ?? false;
+            if (want && !this._blur) {
+                try {
+                    const blur = new Shell.BlurEffect({mode: Shell.BlurMode.BACKGROUND, brightness: 0.6});
+                    // GNOME 46+ calls it radius; older shells used sigma.
+                    if (GObject.Object.find_property.call(Shell.BlurEffect, 'radius'))
+                        blur.radius = 36;
+                    else
+                        blur.sigma = 18;
+                    box.add_effect_with_name('stats-frost', blur);
+                    this._blur = blur;
+                } catch (error) {
+                    logInfo(`frosted glass is unavailable: ${error.message}`);
+                }
+            } else if (!want && this._blur) {
+                box.remove_effect(this._blur);
+                this._blur = null;
+            }
+            if (want)
+                box.add_style_class_name('stats-frosted');
+            else
+                box.remove_style_class_name('stats-frosted');
+        }
+
+        /**
+         * Scroll the dashboard so `actor` (a card) is at the top.
+         *
+         * @param {Clutter.Actor} actor
+         */
+        _scrollTo(actor) {
+            const adjustment = this._scroll.vadjustment ?? this._scroll.vscroll?.adjustment;
+            if (!adjustment)
                 return;
-            this._systemItem = this.menu.addAction('Open System Monitor', () => {
-                app.activate();
+            // Wait a frame: the card may have just unfolded.
+            const id = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                this._closeTimers.delete(id);
+                const [, y] = actor.get_position();
+                adjustment.value = Math.max(0, Math.min(y - 8, adjustment.upper - adjustment.page_size));
+                return GLib.SOURCE_REMOVE;
             });
+            this._closeTimers.add(id);
+        }
+
+        /**
+         * Ask before closing a program. Close sends SIGTERM (as at log-out);
+         * when it is still running 5 s later the button offers Force end,
+         * which sends SIGKILL after a second confirmation.
+         *
+         * @param {{comm: string, name: string, count: number, pids: number[]}} group
+         * @param {boolean} force
+         */
+        _confirmClose(group, force) {
+            const processes = group.count > 1 ? ` (${group.count} processes)` : '';
+            const title = force ? `Force ${group.name} to end?` : `Close ${group.name}${processes}?`;
+            const description = force
+                ? `${group.name} did not quit. Force end stops it at once: anything unsaved in it is lost.`
+                : `${group.name} gets the same request to quit as when you log out. Save your work in it first. Some apps quit without asking.`;
+            this.menu.close();
+            const dialog = new ModalDialog.ModalDialog({destroyOnClose: true});
+            dialog.contentLayout.add_child(new Dialog.MessageDialogContent({title, description}));
+            dialog.setButtons([
+                {label: 'Cancel', action: () => dialog.close(), key: Clutter.KEY_Escape},
+                {
+                    label: force ? 'Force end' : 'Close',
+                    action: () => {
+                        dialog.close();
+                        this._close(group, force);
+                    },
+                    default: true,
+                },
+            ]);
+            dialog.open();
+        }
+
+        /**
+         * @param {{comm: string, name: string, pids: number[]}} group
+         * @param {boolean} force
+         */
+        async _close(group, force) {
+            const signal = force ? 'KILL' : 'TERM';
+            logInfo(`${force ? 'force-ending' : 'closing'} ${group.comm} (${group.pids.length} processes)`);
+            await signalProcesses(group.pids, signal);
+            const id = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, force ? 1 : 5, () => {
+                this._closeTimers.delete(id);
+                stillRunning(group.pids).then(left => {
+                    if (!this._dashboard)
+                        return;
+                    if (left.length === 0) {
+                        this._forceNames.delete(group.comm);
+                        this._dashboard.setNotice(`${group.name} closed.`, 'normal');
+                    } else {
+                        this._forceNames.add(group.comm);
+                        this._dashboard.setNotice(
+                            `${group.name} is still running. Use Force end if it is stuck.`, 'warning');
+                    }
+                    this._dashboard.setPrograms(this._groups, this._forceNames);
+                }).catch(() => {});
+                return GLib.SOURCE_REMOVE;
+            });
+            this._closeTimers.add(id);
         }
 
         /**
