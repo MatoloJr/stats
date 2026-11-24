@@ -193,7 +193,7 @@ install_release() {
 
     bar 2 "Verifying checksum"
     local want got
-    want=$(tr -d '' < "$work/SHA256SUMS" | grep -F " ${ZIP_NAME}" | grep -E "[ *]${ZIP_NAME//./\.}\$" | cut -d' ' -f1 || true)
+    want=$(tr -d '\r' < "$work/SHA256SUMS" | awk -v f="$ZIP_NAME" '{ n = $2; sub(/^\*/, "", n) } n == f { print $1; exit }')
     [ -n "$want" ] || die "SHA256SUMS has no entry for ${ZIP_NAME}"
     got=$(sha256_of "$work/stats.zip")
     [ "$want" = "$got" ] || die "checksum mismatch (expected $want, got $got). Nothing was changed."

@@ -59,7 +59,7 @@ spec:
 # compiles the schema on the user's machine.
 pack:
 	rm -f "$(UUID).shell-extension.zip"
-	python3 -m zipfile -c "$(UUID).shell-extension.zip" $(PACK_FILES)
+	python3 tools/pack.py "$(UUID).shell-extension.zip" $(PACK_FILES)
 	@echo "Wrote $(UUID).shell-extension.zip"
 
 lint:
