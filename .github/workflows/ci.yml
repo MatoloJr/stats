@@ -33,7 +33,7 @@ jobs:
       - run: make test
       - run: make lint
       - run: glib-compile-schemas --strict --dry-run schemas
-      - run: shellcheck install.sh ../scripts/check-version.sh
+      - run: shellcheck ../install.sh ../scripts/check-version.sh
       - run: make pack && python3 -m zipfile -l stats@local.shell-extension.zip
 
   core:
@@ -63,7 +63,7 @@ jobs:
         shell: pwsh
         run: |
           $bad = 0
-          foreach ($f in Get-ChildItem windows -Filter *.ps1) {
+          foreach ($f in @(Get-ChildItem -Filter *.ps1) + @(Get-ChildItem windows -Filter *.ps1)) {
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors) | Out-Null
             foreach ($e in $errors) { Write-Error "$($f.Name): $e"; $bad++ }
@@ -77,10 +77,10 @@ jobs:
         run: |
           $dist = "$env:RUNNER_TEMP\dist"
           New-Item -ItemType Directory -Force $dist | Out-Null
-          Copy-Item target\release\stats.exe, windows\uninstall.ps1 $dist
+          Copy-Item target\release\stats.exe, uninstall.ps1 $dist
           $sums = foreach ($n in 'stats.exe', 'uninstall.ps1') { "{0}  {1}" -f (Get-FileHash "$dist\$n").Hash.ToLower(), $n }
           [IO.File]::WriteAllText("$dist\SHA256SUMS", ($sums -join "`n") + "`n")
-          & .\windows\install.ps1 -Source $dist -Version ci -NoStart
+          & .\install.ps1 -Source $dist -Version ci -NoStart
           if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Stats\stats.exe")) { throw 'install did not place stats.exe' }
           & "$env:LOCALAPPDATA\Programs\Stats\uninstall.ps1" -Purge
           if (Test-Path "$env:LOCALAPPDATA\Programs\Stats") { throw 'uninstall left files behind' }

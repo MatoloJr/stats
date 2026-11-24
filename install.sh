@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://matolojr.github.io/stats/install.sh | bash
 #   curl -fsSL https://matolojr.github.io/stats/install.sh | bash -s -- --uninstall
-#   ./install.sh                 from a checkout: links this folder (for development)
+#   ./install.sh                 from a checkout: links linux/ (for development)
 #
 # Environment:
 #   STATS_VERSION=0.2.0          install that release instead of the latest
@@ -244,7 +244,7 @@ main() {
     # Run from a checkout (./install.sh) -> link it. Piped from curl -> release.
     local src=""
     if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-        src=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+        src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/linux"
     fi
     if [ -n "$src" ] && [ -f "$src/metadata.json" ] && [ -z "${STATS_RELEASE_BASE:-}" ] && [ -z "${STATS_VERSION:-}" ]; then
         install_from_checkout "$src"

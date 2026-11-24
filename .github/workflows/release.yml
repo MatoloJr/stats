@@ -34,7 +34,7 @@ jobs:
           name: windows
           path: |
             target/release/stats.exe
-            windows/uninstall.ps1
+            uninstall.ps1
 
   publish:
     needs: [linux, windows]

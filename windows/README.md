@@ -12,7 +12,7 @@ For users, from PowerShell (no admin):
 irm https://matolojr.github.io/stats/install.ps1 | iex
 ```
 
-[`install.ps1`](install.ps1) downloads `stats.exe` from the latest GitHub release and checks it against `SHA256SUMS`. It installs to `%LOCALAPPDATA%\Programs\Stats`, sets Stats to start with Windows, adds a Start Menu shortcut and an entry in Settings > Apps, and starts it. Running it again upgrades in place. `$env:STATS_VERSION = '0.2.0'` before the command pins a release. To remove Stats, use Settings > Apps > Stats > Uninstall, or `irm https://matolojr.github.io/stats/uninstall.ps1 | iex`. Settings in `%APPDATA%\Stats` are kept unless you pass `-Purge` (or set `$env:STATS_PURGE = "1"` before the one-liner).
+[`install.ps1`](../install.ps1) downloads `stats.exe` from the latest GitHub release and checks it against `SHA256SUMS`. It installs to `%LOCALAPPDATA%\Programs\Stats`, sets Stats to start with Windows, adds a Start Menu shortcut and an entry in Settings > Apps, and starts it. Running it again upgrades in place. `$env:STATS_VERSION = '0.2.0'` before the command pins a release. To remove Stats, use Settings > Apps > Stats > Uninstall, or `irm https://matolojr.github.io/stats/uninstall.ps1 | iex`. Settings in `%APPDATA%\Stats` are kept unless you pass `-Purge` (or set `$env:STATS_PURGE = "1"` before the one-liner).
 
 From a checkout you need Rust with the MSVC toolchain (the same setup you use for Tauri):
 

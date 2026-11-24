@@ -19,7 +19,7 @@ The script checks GNOME Shell and the tools it needs first, and prints the packa
 From this checkout (inside `linux/`):
 
 ```bash
-./install.sh      # links this folder, compiles the schema, enables; same progress bar
+../install.sh     # links this folder, compiles the schema, enables; same progress bar
 # or
 make install
 make enable

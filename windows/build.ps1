@@ -16,7 +16,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $exe = Join-Path $root "target\release\stats.exe"
 $dist = Join-Path $root "target\dist"
 New-Item -ItemType Directory -Force $dist | Out-Null
-Copy-Item $exe, (Join-Path $PSScriptRoot "uninstall.ps1") $dist -Force
+Copy-Item $exe, (Join-Path $root "uninstall.ps1") $dist -Force
 $sums = foreach ($name in "stats.exe", "uninstall.ps1") {
     "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 (Join-Path $dist $name)).Hash.ToLowerInvariant(), $name
 }
@@ -25,7 +25,7 @@ Write-Host "Built $exe ($([math]::Round((Get-Item $exe).Length / 1MB, 2)) MB); r
 
 if ($Install) {
     $version = (Get-Content (Join-Path $root "VERSION") -Raw).Trim()
-    & (Join-Path $PSScriptRoot "install.ps1") -Source $dist -Version "$version-dev"
+    & (Join-Path $root "install.ps1") -Source $dist -Version "$version-dev"
     # The release build output is about 1 GB of intermediate files; it is
     # safe to delete and is rebuilt next time.
     Write-Host "Tip: 'cargo clean' in $root frees the build folder now that it is installed."
