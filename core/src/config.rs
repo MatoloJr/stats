@@ -6,6 +6,7 @@
 //! with a warning written to the log, so a typo can never stop Stats starting.
 
 use crate::numbers::TempUnit;
+use crate::place::Anchor;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Metric {
@@ -84,8 +85,8 @@ pub struct Config {
     pub bar_metrics: Vec<Metric>,
     pub bar_show_speeds: bool,
     pub bar_visible: bool,
-    pub bar_x: Option<i32>,
-    pub bar_y: Option<i32>,
+    pub bar_position: Anchor,
+    pub bar_pinned: bool,
     pub bar_opacity: u8,
     pub hide_when_fullscreen: bool,
     pub temperature_unit: TempUnit,
@@ -122,8 +123,8 @@ impl Default for Config {
             ],
             bar_show_speeds: true,
             bar_visible: true,
-            bar_x: None,
-            bar_y: None,
+            bar_position: Anchor::Center,
+            bar_pinned: false,
             bar_opacity: 235,
             hide_when_fullscreen: true,
             temperature_unit: TempUnit::Celsius,
@@ -156,17 +157,19 @@ pub const DEFAULT_TEXT: &str = r#"# Stats for Windows settings.
 # How often the bar refreshes, in milliseconds (500 to 10000).
 poll-interval-ms = 1000
 
-# What the floating bar shows, left to right. Any of:
+# The activity line sits at the top of the screen: left, center or right.
+# Click it to drop down the readings strip.
+bar-position = center
+# Keep the readings strip open instead of hiding it a few seconds after use.
+bar-pinned = false
+# Show the activity line at all.
+bar-visible = true
+# What the readings strip shows, left to right. Any of:
 # cpu, memory, commit, storage, gpu, temperature, network, refresh
 bar-metrics = cpu, memory, commit, storage, gpu, temperature, network
 # Show disk and network speeds next to the percentages.
 bar-show-speeds = true
-bar-visible = true
-# Bar position in screen pixels. Empty = just above the taskbar, on the right.
-# Dragging the bar saves its position here.
-bar-x =
-bar-y =
-# 80 (see-through) to 255 (solid).
+# Readings strip opacity: 80 (see-through) to 255 (solid).
 bar-opacity = 235
 # Hide the bar while a game or video is running full screen.
 hide-when-fullscreen = true
@@ -292,14 +295,14 @@ pub fn parse(text: &str) -> Parsed {
             }
             "bar-show-speeds" => boolean!(config.bar_show_speeds),
             "bar-visible" => boolean!(config.bar_visible),
-            "bar-x" | "bar-y" => {
-                let parsed = if value.is_empty() { Some(None) } else { value.parse::<i32>().ok().map(Some) };
-                match parsed {
-                    Some(v) if key == "bar-x" => config.bar_x = v,
-                    Some(v) => config.bar_y = v,
-                    None => bad = true,
-                }
-            }
+            "bar-position" => match Anchor::from_key(value) {
+                Some(anchor) => config.bar_position = anchor,
+                None => bad = true,
+            },
+            "bar-pinned" => boolean!(config.bar_pinned),
+            // Before 0.2 the bar could be dragged anywhere; those saved
+            // positions are no longer used but must not fill the log.
+            "bar-x" | "bar-y" => {}
             "bar-opacity" => ranged!(config.bar_opacity, 80, 255, u8),
             "hide-when-fullscreen" => boolean!(config.hide_when_fullscreen),
             "temperature-unit" => match value.to_ascii_lowercase().as_str() {
@@ -451,8 +454,13 @@ mod tests {
     fn lists_and_positions() {
         let parsed = parse("bar-metrics = commit, cpu, bogus, cpu\nbar-x = 1200\nbar-y = \nstorage-drives = c:\\, d\nscan-roots = C:\\a; D:\\b c\n");
         assert_eq!(parsed.config.bar_metrics, vec![Metric::Commit, Metric::Cpu]);
-        assert_eq!(parsed.config.bar_x, Some(1200));
-        assert_eq!(parsed.config.bar_y, None);
+        // Old drag positions are accepted silently.
+        assert_eq!(parsed.config.bar_position, Anchor::Center);
+        let placed = parse("bar-position = Right\nbar-pinned = yes\n");
+        assert!(placed.warnings.is_empty(), "{:?}", placed.warnings);
+        assert_eq!(placed.config.bar_position, Anchor::Right);
+        assert!(placed.config.bar_pinned);
+        assert_eq!(parse("bar-position = top\n").warnings.len(), 1);
         assert_eq!(parsed.config.storage_drives, vec!["C:", "D:"]);
         assert_eq!(parsed.config.scan_roots, vec!["C:\\a", "D:\\b c"]);
         assert_eq!(parsed.warnings.len(), 1);

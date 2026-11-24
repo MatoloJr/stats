@@ -190,12 +190,37 @@ impl Snapshot {
 
 pub struct Sensors {
     pdh: Option<Pdh>,
-    cpu_prev: Option<(u64, u64)>,
+    cpu: CpuMeter,
     pub displays: Vec<Display>,
 }
 
 fn filetime(ft: FILETIME) -> u64 {
     ((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64
+}
+
+/// CPU busy share since the previous call, from `GetSystemTimes` (a single
+/// cheap system call). Each user keeps its own meter, so the activity line
+/// can sample ten times a second without disturbing the 1 s poll.
+#[derive(Default)]
+pub struct CpuMeter {
+    prev: Option<(u64, u64)>,
+}
+
+impl CpuMeter {
+    pub fn sample(&mut self) -> Option<f64> {
+        let (mut idle, mut kernel, mut user): (FILETIME, FILETIME, FILETIME) = unsafe { zeroed() };
+        if unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) } == 0 {
+            return None;
+        }
+        // Kernel time includes idle time.
+        let idle = filetime(idle);
+        let total = filetime(kernel) + filetime(user);
+        let previous = self.prev.replace((idle, total));
+        let (prev_idle, prev_total) = previous?;
+        let total_delta = counter_delta(prev_total, total)?;
+        let idle_delta = counter_delta(prev_idle, idle)?;
+        percent(total_delta.saturating_sub(idle_delta) as f64, total_delta as f64)
+    }
 }
 
 impl Sensors {
@@ -204,28 +229,13 @@ impl Sensors {
         if pdh.is_none() {
             super::util::log("PDH query could not be opened; disk, GPU, network and temperature will read n/a");
         }
-        let mut sensors = Sensors { pdh, cpu_prev: None, displays: Vec::new() };
+        let mut sensors = Sensors { pdh, cpu: CpuMeter::default(), displays: Vec::new() };
         sensors.refresh_displays();
         sensors
     }
 
-    fn cpu(&mut self) -> Option<f64> {
-        let (mut idle, mut kernel, mut user): (FILETIME, FILETIME, FILETIME) = unsafe { zeroed() };
-        if unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) } == 0 {
-            return None;
-        }
-        // Kernel time includes idle time.
-        let idle = filetime(idle);
-        let total = filetime(kernel) + filetime(user);
-        let previous = self.cpu_prev.replace((idle, total));
-        let (prev_idle, prev_total) = previous?;
-        let total_delta = counter_delta(prev_total, total)?;
-        let idle_delta = counter_delta(prev_idle, idle)?;
-        percent(total_delta.saturating_sub(idle_delta) as f64, total_delta as f64)
-    }
-
     pub fn sample(&mut self, drives: &[String]) -> Snapshot {
-        let mut s = Snapshot { cpu: self.cpu(), ..Default::default() };
+        let mut s = Snapshot { cpu: self.cpu.sample(), ..Default::default() };
 
         let mut status: MEMORYSTATUSEX = unsafe { zeroed() };
         status.dwLength = size_of::<MEMORYSTATUSEX>() as u32;

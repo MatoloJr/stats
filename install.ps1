@@ -28,6 +28,26 @@ function Install-Stats {
     $exePath = Join-Path $installDir 'stats.exe'
     $files = @('stats.exe', 'uninstall.ps1')
 
+    # Process id of a running Stats, found by its hidden main window.
+    function Get-StatsWindowProcessId {
+        try {
+            if (-not ('StatsWin32' -as [type])) {
+                Add-Type -Namespace '' -Name 'StatsWin32' -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern System.IntPtr FindWindowW(string cls, System.IntPtr title);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern uint GetWindowThreadProcessId(System.IntPtr hwnd, out uint pid);
+'@
+            }
+            $hwnd = [StatsWin32]::FindWindowW('StatsForWindowsMain', [IntPtr]::Zero)
+            if ($hwnd -eq [IntPtr]::Zero) { return $null }
+            $procId = [uint32]0
+            [StatsWin32]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+            if ($procId -gt 0) { return [int]$procId }
+        } catch { }
+        return $null
+    }
+
     function Step([int]$n, [string]$label) {
         $width = 20
         $filled = [int]($n * $width / 5)
@@ -102,10 +122,17 @@ function Install-Stats {
         }
 
         Step 3 'Stopping the running copy'
-        # Only our own copy: another program could also be called stats.exe.
-        Get-Process -Name stats -ErrorAction SilentlyContinue |
-            Where-Object { $_.Path -and ($_.Path -ieq $exePath) } |
-            ForEach-Object { $_ | Stop-Process -Force; $_.WaitForExit(5000) | Out-Null }
+        # Our installed copy, plus any Stats started from elsewhere (say a
+        # stats.exe in Downloads): only one Stats can run, so a stray copy
+        # would keep the new one from starting. Stats is recognised by its
+        # window class, never by the file name alone.
+        $ids = @(Get-Process -Name stats -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -and ($_.Path -ieq $exePath) } | ForEach-Object { $_.Id })
+        $ids += Get-StatsWindowProcessId
+        foreach ($id in ($ids | Where-Object { $_ } | Select-Object -Unique)) {
+            $p = Get-Process -Id $id -ErrorAction SilentlyContinue
+            if ($p) { $p | Stop-Process -Force; $p.WaitForExit(5000) | Out-Null }
+        }
 
         Step 4 "Installing to $installDir"
         New-Item -ItemType Directory -Force $installDir | Out-Null
@@ -164,7 +191,7 @@ function Install-Stats {
 
     Write-Host ''
     Write-Host "Stats $Version is installed and starts with Windows."
-    Write-Host 'Look for the bar above the taskbar and the tray icon. Settings: right-click the bar > Settings.'
+    Write-Host 'Look for the small moving line at the top of your screen: click it for the readings, click those for the dashboard.'
     Write-Host 'Remove it from Settings > Apps > Installed apps, or: irm https://matolojr.github.io/stats/uninstall.ps1 | iex'
 }
 

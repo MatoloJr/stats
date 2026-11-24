@@ -6,6 +6,7 @@ pub mod bar;
 pub mod dashboard;
 pub mod draw;
 pub mod icon;
+pub mod line;
 pub mod procs;
 pub mod sensors;
 pub mod tray;

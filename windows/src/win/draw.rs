@@ -1,10 +1,11 @@
-//! GDI drawing: a double-buffered canvas, fonts, text and sparklines.
+//! GDI drawing: a double-buffered canvas, fonts, icons, text and sparklines.
 //! Every GDI object created here is deleted again, so painting never leaks.
 
 use std::mem::zeroed;
 use std::ptr::null_mut;
+use std::sync::OnceLock;
 
-use windows_sys::Win32::Foundation::{COLORREF, HWND, POINT, RECT, SIZE};
+use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, POINT, RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::*;
 
 use super::util::wide;
@@ -14,17 +15,22 @@ pub const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
     r as u32 | (g as u32) << 8 | (b as u32) << 16
 }
 
-pub const BG: COLORREF = rgb(24, 26, 31);
-pub const PANEL: COLORREF = rgb(32, 35, 42);
-pub const LINE: COLORREF = rgb(52, 56, 66);
-pub const TEXT: COLORREF = rgb(232, 234, 238);
-pub const MUTED: COLORREF = rgb(150, 156, 168);
-pub const ACCENT: COLORREF = rgb(94, 170, 255);
-pub const WARN: COLORREF = rgb(255, 184, 76);
-pub const CRIT: COLORREF = rgb(255, 92, 92);
-pub const OK: COLORREF = rgb(96, 208, 140);
-pub const BUTTON: COLORREF = rgb(48, 54, 66);
-pub const BUTTON_HOT: COLORREF = rgb(64, 72, 88);
+// One palette everywhere, matching the website: graphite surfaces, light ink
+// and one teal accent. Amber and red are the only other hues, kept because in
+// a monitor they carry meaning: warning and critical.
+pub const BG: COLORREF = rgb(19, 25, 23);
+pub const PANEL: COLORREF = rgb(27, 34, 32);
+pub const PANEL_HOT: COLORREF = rgb(34, 43, 40);
+pub const LINE: COLORREF = rgb(45, 55, 52);
+pub const TEXT: COLORREF = rgb(230, 235, 231);
+pub const MUTED: COLORREF = rgb(150, 163, 158);
+pub const ACCENT: COLORREF = rgb(76, 194, 166);
+pub const ACCENT_DIM: COLORREF = rgb(31, 74, 64);
+pub const WARN: COLORREF = rgb(245, 178, 72);
+pub const CRIT: COLORREF = rgb(240, 96, 90);
+pub const OK: COLORREF = ACCENT;
+pub const BUTTON: COLORREF = rgb(38, 48, 45);
+pub const BUTTON_HOT: COLORREF = rgb(50, 63, 59);
 
 pub fn level_color(level: Level) -> COLORREF {
     match level {
@@ -34,16 +40,79 @@ pub fn level_color(level: Level) -> COLORREF {
     }
 }
 
+/// Accent when normal, amber or red otherwise: for lines, edges and waves.
+pub fn signal_color(level: Level) -> COLORREF {
+    match level {
+        Level::Normal => ACCENT,
+        other => level_color(other),
+    }
+}
+
+/// (r, g, b) of a COLORREF.
+pub fn parts(color: COLORREF) -> (u8, u8, u8) {
+    ((color & 0xFF) as u8, ((color >> 8) & 0xFF) as u8, ((color >> 16) & 0xFF) as u8)
+}
+
+/// Icon glyphs: Segoe Fluent Icons, or the same code points in Segoe MDL2
+/// Assets on Windows 10.
+pub mod glyph {
+    pub const PIN: char = '\u{E718}';
+    pub const PINNED: char = '\u{E840}';
+    pub const CHEVRON_DOWN: char = '\u{E70D}';
+    pub const CHEVRON_RIGHT: char = '\u{E76C}';
+    pub const SETTINGS: char = '\u{E713}';
+    pub const CLOSE: char = '\u{E711}';
+    pub const POWER: char = '\u{E7E8}';
+    pub const SEARCH: char = '\u{E721}';
+    pub const DOCUMENT: char = '\u{E8A5}';
+}
+
 pub struct Fonts {
     pub dpi: u32,
     pub normal: HFONT,
     pub bold: HFONT,
     pub small: HFONT,
     pub title: HFONT,
+    /// Readings strip, like the website's bar.
+    pub mono: HFONT,
+    pub mono_bold: HFONT,
+    /// Big numbers on the dashboard tiles.
+    pub big: HFONT,
+    pub icons: HFONT,
 }
 
-fn make_font(points: i32, weight: i32, dpi: u32) -> HFONT {
-    let face = wide("Segoe UI");
+unsafe extern "system" fn found_font(_: *const LOGFONTW, _: *const TEXTMETRICW, _: u32, found: LPARAM) -> i32 {
+    *(found as *mut bool) = true;
+    0
+}
+
+fn installed(face: &str) -> bool {
+    let mut lf: LOGFONTW = unsafe { zeroed() };
+    lf.lfCharSet = DEFAULT_CHARSET;
+    for (slot, unit) in lf.lfFaceName.iter_mut().zip(face.encode_utf16().take(31)) {
+        *slot = unit;
+    }
+    let mut found = false;
+    unsafe {
+        let dc = GetDC(null_mut());
+        EnumFontFamiliesExW(dc, &lf, Some(found_font), &mut found as *mut bool as LPARAM, 0);
+        ReleaseDC(null_mut(), dc);
+    }
+    found
+}
+
+/// (monospace face, icon face), looked up once.
+fn faces() -> (&'static str, &'static str) {
+    static FACES: OnceLock<(&str, &str)> = OnceLock::new();
+    *FACES.get_or_init(|| {
+        let mono = if installed("Cascadia Mono") { "Cascadia Mono" } else { "Consolas" };
+        let icons = if installed("Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" };
+        (mono, icons)
+    })
+}
+
+fn make_font(face: &str, points: i32, weight: i32, dpi: u32) -> HFONT {
+    let face = wide(face);
     let height = -(points * dpi as i32 / 72);
     unsafe {
         CreateFontW(
@@ -68,12 +137,17 @@ fn make_font(points: i32, weight: i32, dpi: u32) -> HFONT {
 impl Fonts {
     pub fn new(dpi: u32) -> Self {
         let dpi = dpi.max(96);
+        let (mono, icons) = faces();
         Fonts {
             dpi,
-            normal: make_font(9, FW_NORMAL as i32, dpi),
-            bold: make_font(9, FW_SEMIBOLD as i32, dpi),
-            small: make_font(8, FW_NORMAL as i32, dpi),
-            title: make_font(11, FW_SEMIBOLD as i32, dpi),
+            normal: make_font("Segoe UI", 9, FW_NORMAL as i32, dpi),
+            bold: make_font("Segoe UI", 9, FW_SEMIBOLD as i32, dpi),
+            small: make_font("Segoe UI", 8, FW_NORMAL as i32, dpi),
+            title: make_font("Segoe UI", 11, FW_SEMIBOLD as i32, dpi),
+            mono: make_font(mono, 9, FW_NORMAL as i32, dpi),
+            mono_bold: make_font(mono, 9, FW_BOLD as i32, dpi),
+            big: make_font("Segoe UI", 17, FW_SEMIBOLD as i32, dpi),
+            icons: make_font(icons, 10, FW_NORMAL as i32, dpi),
         }
     }
 
@@ -86,16 +160,17 @@ impl Fonts {
 impl Drop for Fonts {
     fn drop(&mut self) {
         unsafe {
-            DeleteObject(self.normal);
-            DeleteObject(self.bold);
-            DeleteObject(self.small);
-            DeleteObject(self.title);
+            for font in
+                [self.normal, self.bold, self.small, self.title, self.mono, self.mono_bold, self.big, self.icons]
+            {
+                DeleteObject(font);
+            }
         }
     }
 }
 
 /// Paints into an off-screen bitmap, copied to the window in one step on
-/// drop, so the bar never flickers.
+/// drop, so nothing flickers.
 pub struct Canvas {
     hwnd: HWND,
     ps: PAINTSTRUCT,
@@ -174,6 +249,29 @@ impl Canvas {
             );
         }
         x + self.measure(text)
+    }
+
+    /// Text centred in `rect`.
+    pub fn text_center(&self, text: &str, rect: RECT, color: COLORREF) {
+        let utf16: Vec<u16> = text.encode_utf16().collect();
+        let mut r = rect;
+        unsafe {
+            SetTextColor(self.dc, color);
+            DrawTextW(
+                self.dc,
+                utf16.as_ptr(),
+                utf16.len() as i32,
+                &mut r,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+            );
+        }
+    }
+
+    /// One icon glyph centred in `rect`. Leaves the icon font selected.
+    pub fn icon(&mut self, fonts: &Fonts, glyph: char, rect: RECT, color: COLORREF) {
+        self.font(fonts.icons);
+        let mut buf = [0u8; 4];
+        self.text_center(glyph.encode_utf8(&mut buf), rect, color);
     }
 
     /// Right-aligned single line ending at `right`.

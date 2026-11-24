@@ -14,4 +14,6 @@ pub mod history;
 pub mod junk;
 pub mod numbers;
 pub mod pagefile;
+pub mod place;
 pub mod pressure;
+pub mod wave;

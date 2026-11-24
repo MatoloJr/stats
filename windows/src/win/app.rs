@@ -22,21 +22,26 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::actions::{self, Action, Done, Reply, WM_APP_WAKE};
 use super::draw::Fonts;
-use super::sensors::{Sensors, Snapshot};
+use super::sensors::{CpuMeter, Sensors, Snapshot};
 use super::util::{self, wide};
-use super::{bar, dashboard, icon, procs, tray};
+use super::{bar, dashboard, icon, line, procs, tray};
 use stats_core::advice;
 use stats_core::config::{self, Config, Level};
 use stats_core::history::Ring;
 use stats_core::junk::JunkDir;
 use stats_core::numbers::fmt_bytes;
 use stats_core::pagefile::{self, PageFile};
+use stats_core::place::Anchor;
 use stats_core::pressure::{self, Group, Guard, Kind, Trigger};
+use stats_core::wave::Wave;
 
 pub const WM_APP_ACTION: u32 = WM_APP + 3;
 pub const WM_APP_SHOW_DASH: u32 = WM_APP + 4;
 pub const MAIN_CLASS: &str = "StatsForWindowsMain";
 const TIMER_ID: usize = 1;
+const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
+const WTS_SESSION_LOCK: usize = 7;
+const WTS_SESSION_UNLOCK: usize = 8;
 
 const MINUTE: u64 = 60_000;
 const HOUR: u64 = 60 * MINUTE;
@@ -82,8 +87,17 @@ impl History {
 
 pub struct App {
     pub main: HWND,
+    /// The readings strip.
     pub bar: HWND,
     pub dash: HWND,
+    /// Dimmed backdrop behind the dashboard.
+    pub scrim: HWND,
+    pub line: line::State,
+    pub strip: bar::Strip,
+    pub wave: Wave,
+    pub cpu_meter: CpuMeter,
+    /// The session is locked: nothing is drawn.
+    locked: bool,
     pub config: Config,
     config_mtime: Option<SystemTime>,
     pub sensors: Sensors,
@@ -115,7 +129,6 @@ pub struct App {
     pub bar_fonts: Fonts,
     pub dash_fonts: Fonts,
     pub bar_layout: bar::Layout,
-    pub bar_hidden: bool,
     pub dash_state: dashboard::State,
     pub modal: bool,
     pending: Option<Action>,
@@ -223,12 +236,20 @@ pub fn create(instance: HINSTANCE) -> Result<(), String> {
     let (config, config_mtime) = load_config();
     let main = create_main_window(instance)?;
     let bar = bar::create(instance)?;
-    let dash = dashboard::create(instance)?;
+    let (dash, scrim) = dashboard::create(instance)?;
+    let line = line::create(instance)?;
+    // Pause the animation while the screen is locked.
+    unsafe {
+        windows_sys::Win32::System::RemoteDesktop::WTSRegisterSessionNotification(
+            main,
+            windows_sys::Win32::System::RemoteDesktop::NOTIFY_FOR_THIS_SESSION,
+        )
+    };
 
     let (tx, rx) = channel();
     let reply = Reply { tx, hwnd: main as isize };
     let proc_tx = start_process_thread(reply.clone());
-    let dpi = unsafe { GetDpiForWindow(bar) };
+    let dpi = unsafe { GetDpiForWindow(line.hwnd) };
     let capacity = (config.history_seconds * 1000 / config.poll_interval_ms).max(2) as usize;
     let taskbar_created = unsafe { RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()) };
     let icon = icon::make(Level::Normal, 0.3);
@@ -238,6 +259,12 @@ pub fn create(instance: HINSTANCE) -> Result<(), String> {
         main,
         bar,
         dash,
+        scrim,
+        line,
+        strip: bar::Strip::default(),
+        wave: Wave::new(line::COLUMNS),
+        cpu_meter: CpuMeter::default(),
+        locked: false,
         sensors: Sensors::new(),
         snap: Snapshot::default(),
         hist: History::new(capacity),
@@ -267,7 +294,6 @@ pub fn create(instance: HINSTANCE) -> Result<(), String> {
         bar_fonts: Fonts::new(dpi),
         dash_fonts: Fonts::new(dpi),
         bar_layout: bar::Layout::default(),
-        bar_hidden: false,
         dash_state: dashboard::State::default(),
         modal: false,
         pending: None,
@@ -277,7 +303,12 @@ pub fn create(instance: HINSTANCE) -> Result<(), String> {
     let interval = app.config.poll_interval_ms;
     APP.with(|cell| *cell.borrow_mut() = Some(app));
     unsafe { SetTimer(main, TIMER_ID, interval, None) };
-    with_app(|app| app.tick());
+    with_app(|app| {
+        app.tick();
+        if app.config.bar_pinned {
+            bar::open(app);
+        }
+    });
     Ok(())
 }
 
@@ -365,7 +396,7 @@ impl App {
             self.last_slow = now;
             self.slow_checks(now);
         }
-        self.update_bar();
+        self.update_overlay();
         self.update_tray();
         if self.dash_visible() {
             unsafe { InvalidateRect(self.dash, null(), 0) };
@@ -461,13 +492,21 @@ impl App {
             return;
         }
         let interval_changed = config.poll_interval_ms != self.config.poll_interval_ms;
+        let moved = config.bar_position != self.config.bar_position;
+        let pinned = config.bar_pinned && !self.config.bar_pinned;
         let capacity = (config.history_seconds * 1000 / config.poll_interval_ms).max(2) as usize;
         self.config = config;
         self.hist.resize(capacity);
         if interval_changed {
             unsafe { SetTimer(self.main, TIMER_ID, self.config.poll_interval_ms, None) };
         }
-        unsafe { SetLayeredWindowAttributes(self.bar, 0, self.config.bar_opacity, LWA_ALPHA) };
+        bar::apply_opacity(self);
+        if moved {
+            line::place(self);
+        }
+        if pinned {
+            bar::open(self);
+        }
         self.status = Some(("Settings reloaded.".into(), true));
         util::log("settings reloaded");
     }
@@ -481,32 +520,36 @@ impl App {
         matches!(state, 2..=4)
     }
 
-    fn update_bar(&mut self) {
-        let hide = !self.config.bar_visible || (self.config.hide_when_fullscreen && self.fullscreen_app_running());
+    /// Show or hide the activity line and the strip, once a poll.
+    pub fn update_overlay(&mut self) {
+        // While our own dashboard is open its full-screen backdrop would
+        // read as "a full-screen app is running", so skip that check then.
+        let hide = self.locked
+            || !self.config.bar_visible
+            || (self.config.hide_when_fullscreen && !self.dash_visible() && self.fullscreen_app_running());
         if hide {
-            if !self.bar_hidden {
-                unsafe { ShowWindow(self.bar, SW_HIDE) };
-                self.bar_hidden = true;
-            }
+            line::hide(self);
+            bar::hide_now(self);
             return;
         }
-        bar::relayout(self);
-        if self.bar_hidden {
-            unsafe { ShowWindow(self.bar, SW_SHOWNOACTIVATE) };
-            self.bar_hidden = false;
+        line::show(self);
+        line::update_tooltip(self);
+        if self.strip.open {
+            bar::relayout(self);
         }
-        // Stay above the taskbar even after it has been clicked.
+        // Stay above the taskbar and other topmost windows.
         unsafe {
-            SetWindowPos(
-                self.bar,
-                HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
-            );
-            InvalidateRect(self.bar, null(), 0);
+            for hwnd in [self.line.hwnd, self.bar] {
+                SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                );
+            }
         }
     }
 
@@ -744,14 +787,20 @@ const MENU_DASH: usize = 1;
 const MENU_BAR: usize = 2;
 const MENU_AUTOSTART: usize = 3;
 const MENU_SETTINGS: usize = 4;
-const MENU_RESET: usize = 5;
+const MENU_PIN: usize = 5;
 const MENU_LOG: usize = 6;
 const MENU_SCAN: usize = 7;
 const MENU_EXIT: usize = 9;
+/// Position items: MENU_POSITION + index in Anchor::ALL.
+const MENU_POSITION: usize = 20;
 
 /// Tray or bar right-click menu. Runs with the app released.
 pub fn show_menu() {
-    let Some((main, bar_visible)) = with_app(|app| (app.main, app.config.bar_visible)) else { return };
+    let Some((main, bar_visible, pinned, position)) =
+        with_app(|app| (app.main, app.config.bar_visible, app.config.bar_pinned, app.config.bar_position))
+    else {
+        return;
+    };
     let autostart = util::autostart_enabled();
     let choice = unsafe {
         let menu = CreatePopupMenu();
@@ -762,8 +811,14 @@ pub fn show_menu() {
         add(MENU_DASH, "Open dashboard", false);
         add(MENU_SCAN, "Scan build folders now", false);
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
-        add(MENU_BAR, "Show bar", bar_visible);
-        add(MENU_RESET, "Move bar back above the taskbar", false);
+        let positions = CreatePopupMenu();
+        for (i, anchor) in Anchor::ALL.into_iter().enumerate() {
+            let flags = MF_STRING | if anchor == position { MF_CHECKED } else { MF_UNCHECKED };
+            AppendMenuW(positions, flags, MENU_POSITION + i, wide(anchor.label()).as_ptr());
+        }
+        AppendMenuW(menu, MF_POPUP, positions as usize, wide("Line position").as_ptr());
+        add(MENU_PIN, "Pin readings", pinned);
+        add(MENU_BAR, "Show activity line", bar_visible);
         add(MENU_AUTOSTART, "Start with Windows", autostart);
         add(MENU_SETTINGS, "Settings…", false);
         add(MENU_LOG, "Open log", false);
@@ -792,19 +847,14 @@ pub fn show_menu() {
                 app.config.bar_visible = !app.config.bar_visible;
                 let value = app.config.bar_visible.to_string();
                 save_setting(app, "bar-visible", &value);
-                app.update_bar();
+                app.update_overlay();
             });
         }
-        MENU_RESET => {
-            with_app(|app| {
-                app.config.bar_x = None;
-                app.config.bar_y = None;
-                save_setting(app, "bar-x", "");
-                save_setting(app, "bar-y", "");
-                app.config.bar_visible = true;
-                save_setting(app, "bar-visible", "true");
-                app.update_bar();
-            });
+        MENU_PIN => {
+            with_app(|app| bar::set_pinned(app, !pinned));
+        }
+        n if (MENU_POSITION..MENU_POSITION + Anchor::ALL.len()).contains(&n) => {
+            with_app(|app| dashboard::set_position(app, Anchor::ALL[n - MENU_POSITION]));
         }
         MENU_AUTOSTART => {
             if !util::set_autostart(!autostart) {
@@ -861,13 +911,25 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             WM_DISPLAYCHANGE | WM_SETTINGCHANGE | WM_DPICHANGED => {
                 with_app(|app| {
                     app.sensors.refresh_displays();
-                    app.update_bar();
+                    line::place(app);
+                    app.update_overlay();
                 });
                 None
+            }
+            WM_WTSSESSION_CHANGE => {
+                if wparam == WTS_SESSION_LOCK || wparam == WTS_SESSION_UNLOCK {
+                    with_app(|app| {
+                        app.locked = wparam == WTS_SESSION_LOCK;
+                        util::log(if app.locked { "session locked: line paused" } else { "session unlocked" });
+                        app.update_overlay();
+                    });
+                }
+                Some(0)
             }
             WM_QUERYENDSESSION => Some(1),
             WM_DESTROY => {
                 with_app(|app| {
+                    windows_sys::Win32::System::RemoteDesktop::WTSUnRegisterSessionNotification(app.main);
                     tray::remove(app.main);
                     icon::destroy(app.icon);
                 });
